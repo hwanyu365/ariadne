@@ -285,6 +285,9 @@ CANDIDATES_JS = """el => {
 
 # 하이라이트·툴바를 붙이고 클릭을 가로챈다. 페이지 동작을 바꾸지 않도록 전부 fixed 로 띄운다.
 PICKER_JS = """function install(opts) {
+  // add_init_script 는 모든 프레임에서 돈다. 광고·임베드마다 툴바가 붙으면 페이지를 쓸 수 없고,
+  // iframe 안은 수집 대상도 아니다 (docs/specification.md 제외 범위).
+  if (window !== window.top) return;
   const targets = (opts && opts.targets) || ['본문', 'next', '제목'];
   const UI = 'data-ariadne-ui';
   let current = targets[0];

@@ -145,6 +145,31 @@ def test_picker_installs_when_injected_before_document():
     assert got and got[0]["sel"] == "div.article.body", got
 
 
+def test_picker_skips_iframes():
+    """iframe 에는 붙지 않는다. `add_init_script` 는 모든 프레임에서 돌아 광고마다 툴바가 뜬다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "inner.html").write_text('<meta charset="utf-8"><body><a id="ad" href="/x">광고</a></body>',
+                                      encoding="utf-8")
+        (d / "outer.html").write_text(FIXTURE.replace("</body>",
+                                      '<iframe src="inner.html" width="200" height="80"></iframe></body>'),
+                                      encoding="utf-8")
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.expose_function("__ariadne_pick", lambda payload: None)
+            page.add_init_script(picker_setup_js())
+            page.goto((d / "outer.html").as_uri(), wait_until="load")
+            page.wait_for_timeout(300)
+            main_ui = page.evaluate("() => document.querySelectorAll('[data-ariadne-ui]').length")
+            inner = [f for f in page.frames if f != page.main_frame]
+            frame_ui = [f.evaluate("() => document.querySelectorAll('[data-ariadne-ui]').length") for f in inner]
+            browser.close()
+    assert main_ui > 0, "메인 프레임에 붙지 않았다"
+    assert inner, "픽스처에 iframe 이 없다"
+    assert frame_ui == [0] * len(inner), f"iframe 에 붙었다: {frame_ui}"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:
