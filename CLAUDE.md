@@ -124,13 +124,14 @@ python test_scrape.py
     - 작성자가 직접 resolve 할 수 있어 설정의 강제력은 약하다 → 반영했거나 반영하지 않을 근거를 남긴 뒤에만 resolve 한다.
   - 브랜치가 최신 `main` 이 아니어도 merge 된다 → `main` 이 앞서간 뒤에는 CI 결과가 낡을 수 있다.
     - 자율 범위 `merge` 에서는 사람이 보지 않으므로, merge 전에 `main` 이 앞섰는지 확인한다.
-      - 확인: `git fetch origin main` 후 `git merge-base --is-ancestor origin/main HEAD` → 종료 코드 0 이면 최신, 1 이면 `main` 이 앞섰다.
-      - 전제: 로컬 `HEAD` 가 PR 의 push 된 head 와 같아야 한다 → 다르면 확인 결과가 PR 에 대한 것이 아니다.
-      - 종료 코드 0·1 이외(`fetch` 실패, ref 없음 등 128 포함)는 확인 실패다 → merge 하지 않고 소유자에게 알린다.
+      - 확인: `git fetch origin main && git merge-base --is-ancestor origin/main HEAD` → 종료 코드 0 이면 최신, 1 이면 `main` 이 앞섰다.
+      - `fetch` 를 `&&` 로 묶는다. 따로 실행하면 `fetch` 가 실패해도 전에 받아 둔 낡은 `origin/main` 으로 0 이 나와 "최신" 으로 오판한다.
+      - 로컬 `HEAD` 가 PR 의 push 된 head 와 같은지도 본다 → `test "$(git rev-parse HEAD)" = "$(gh pr view {PR번호} --json headRefOid -q .headRefOid)"`
+      - 종료 코드 0·1 이외거나 위 확인이 어긋나면 확인 실패다 → merge 하지 않고 소유자에게 알린다.
     - 앞섰으면 브랜치를 갱신해 CI `verify` 를 다시 통과시킨 뒤 merge 한다.
       - 갱신: `gh pr update-branch {PR번호}`
-      - 갱신 후 새 head SHA 에서 `verify` 가 실제로 시작되어 통과했는지 확인한다.
-      - `verify` 가 시작되지 않으면 merge 하지 않고 소유자에게 알린다.
+      - 갱신 후 새 head SHA 에서 `verify` 가 시작되어 통과했는지 확인한다 → `gh run list --commit {새 head SHA}`
+      - 시작되지 않으면 merge 하지 않고 소유자에게 알린다. push 주체에 따라 워크플로가 트리거되지 않거나 승인 대기가 된다.
       - 다시 통과시킬 대상은 CI `verify` 다 → 로컬 `python test_scrape.py` 재실행은 낡은 base 를 해소하지 못한다.
       - "검증 명령은 하나" 와 어긋나지 않는다 → 로컬 통과는 CI 통과를 뜻하지만, 새 base 에서의 결과는 CI 에서만 얻는다.
 
