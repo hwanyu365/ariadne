@@ -1,0 +1,336 @@
+"""페이지네이션된 웹 페이지를 끝까지 넘기며 본문 텍스트나 이미지를 로컬 파일로 저장한다."""
+
+import argparse
+import mimetypes
+import sys
+import time
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
+from playwright.sync_api import Error as PWError
+from playwright.sync_api import sync_playwright
+
+# 윈도우 콘솔 기본 cp949 에서 한글 로그가 깨진다.
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp")
+
+
+def _stderr(msg):
+    print(msg, file=sys.stderr)
+
+
+def read_text(page, selector, timeout):
+    """selector 에 걸리는 모든 요소의 보이는 텍스트를 합쳐서 돌려준다."""
+    page.wait_for_selector(selector, timeout=timeout)
+    return "\n".join(t.strip() for t in page.locator(selector).all_inner_texts()).strip()
+
+
+def read_srcs(page, selector, timeout):
+    """selector 에 걸리는 이미지들의 주소를 줄바꿈으로 이어 돌려준다. 페이지 변경 판정도 이 문자열로 한다."""
+    # 지연 로딩 이미지는 주소가 붙기 전까지 크기가 0 이라 visible 로는 기다릴 수 없다.
+    page.wait_for_selector(selector, timeout=timeout, state="attached")
+    srcs = page.locator(selector).evaluate_all(
+        # 지연 로딩 사이트는 src 에 placeholder 를 넣고 실제 주소를 data-src 에 둔다.
+        "els => els.map(e => e.dataset.src || e.getAttribute('data-src') || e.currentSrc || e.src || '')"
+    )
+    return "\n".join(s for s in srcs if s and not s.startswith("data:"))
+
+
+def scroll_all(page, step=800, pause=120):
+    """지연 로딩 이미지는 화면에 들어와야 주소가 채워지므로 한 번 훑어 내린다."""
+    page.evaluate(
+        """async o => {
+            for (let y = 0; y < document.body.scrollHeight; y += o.step) {
+              window.scrollTo(0, y);
+              await new Promise(r => setTimeout(r, o.pause));
+            }
+            window.scrollTo(0, 0);
+        }""",
+        {"step": step, "pause": pause},
+    )
+
+
+def read_title(page, selector):
+    """제목 셀렉터가 비었거나 안 걸려도 빈 문자열을 돌려준다. 헤더는 부가 정보라 본문 수집을 멈출 이유가 못 된다."""
+    if not selector:
+        return ""
+    loc = page.locator(selector)
+    if loc.count() == 0:
+        return ""
+    return " ".join((loc.first.inner_text() or "").split())
+
+
+def wait_change(page, selector, old, timeout, read=read_text):
+    """SPA 는 next 클릭 후에도 URL·DOM 이 그대로일 수 있어, 수집 대상이 실제로 바뀔 때까지 폴링한다."""
+    deadline = time.time() + timeout / 1000
+    while time.time() < deadline:
+        try:
+            cur = read(page, selector, timeout=1000)
+        except Exception:
+            cur = ""
+        if cur and cur != old:
+            return cur
+        page.wait_for_timeout(200)
+    return None
+
+
+def is_clickable(locator):
+    if locator.count() == 0:
+        return False
+    first = locator.first
+    # 마지막 페이지에서 next 를 숨기는 사이트와 비활성화만 하는 사이트가 반반이라 둘 다 본다.
+    return (
+        first.is_visible()
+        and first.is_enabled()
+        and first.get_attribute("aria-disabled") != "true"
+    )
+
+
+def goto_next(page, next_sel, timeout):
+    """다음 페이지로 넘긴다. 성공하면 None, 못 넘기면 사유 문자열."""
+    nxt = page.locator(next_sel)
+    if nxt.count() == 0:
+        return f"next 셀렉터 {next_sel!r} 에 걸리는 요소가 없다."
+    if is_clickable(nxt):
+        nxt.first.click()
+        return None
+    # 숨김·비활성이어도 href 가 살아 있으면 직접 이동한다.
+    # 마지막이 아닌 페이지에서도 next 를 CSS 로만 죽여두는 사이트가 있어서, 여기서 포기하면 1페이지만 받고 끝난다.
+    href = nxt.first.get_attribute("href") or ""
+    if href and not href.startswith(("#", "javascript:")):
+        page.goto(urljoin(page.url, href), wait_until="domcontentloaded", timeout=timeout)
+        return None
+    return "next 요소는 있으나 숨김/비활성이고 href 도 없다. 마지막 페이지로 본다."
+
+
+def _image_ext(url, content_type):
+    suffix = Path(urlparse(url).path).suffix.lower()
+    if suffix in IMAGE_EXTS:
+        return suffix
+    return mimetypes.guess_extension((content_type or "").split(";")[0].strip()) or ".bin"
+
+
+def save_images(page, srcs, prefix, num, digits, log):
+    """한 페이지의 이미지를 받아 저장하고 저장한 장수를 돌려준다."""
+    saved = 0
+    for i, src in enumerate(srcs, 1):
+        url = urljoin(page.url, src)
+        try:
+            # 브라우저 컨텍스트로 받아야 쿠키와 referer 가 실려, 핫링크를 막는 사이트에서도 통한다.
+            resp = page.request.get(url, headers={"referer": page.url})
+            if not resp.ok:
+                log(f"  건너뜀 HTTP {resp.status} {url[:80]}")
+                continue
+            body = resp.body()
+            ext = _image_ext(url, resp.headers.get("content-type"))
+            out = prefix.with_name(f"{prefix.name}_{num:0{digits}d}_{i:03d}{ext}")
+            out.write_bytes(body)
+            saved += 1
+        except PWError as e:
+            log(f"  건너뜀 {url[:80]} ({str(e).splitlines()[0][:60]})")
+    return saved
+
+
+def save_text(page, text, prefix, num, digits, title_sel, log):
+    """본문을 파일로 쓰고 (길이, 파일명) 을 돌려준다."""
+    body = text
+    if title_sel:
+        # 제목을 본문에 싣지 않는 사이트가 있어, "{n}화. {제목}" 헤더를 직접 붙인다.
+        title = read_title(page, title_sel)
+        if not title:
+            log(f"  경고: 제목 셀렉터 {title_sel!r} 에 걸리는 요소가 없다.")
+        head = f"{num}화. {title}" if title else f"{num}화."
+        body = f"{head}\n\n{text}"
+    out = prefix.with_name(f"{prefix.name}_{num:0{digits}d}.txt")
+    out.write_text(body, encoding="utf-8")
+    return len(body), out.name
+
+
+def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False, delay=0,
+           digits=4, start=1, title_sel=None, mode="text", on_log=None, stop=None):
+    log = on_log or _stderr
+    images = mode == "image"
+    read = read_srcs if images else read_text
+    prefix = Path(prefix)
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    pages = 0
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not headful)
+        page = browser.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+        if images:
+            scroll_all(page)
+        current = read(page, sel, timeout)
+
+        while True:
+            pages += 1
+            num = start + pages - 1
+            # 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
+            if images:
+                n = save_images(page, current.splitlines(), prefix, num, digits, log)
+                log(f"[{pages}] 이미지 {n}장 -> {prefix.name}_{num:0{digits}d}_*")
+            else:
+                size, name = save_text(page, current, prefix, num, digits, title_sel, log)
+                log(f"[{pages}] {size}자 -> {name}")
+
+            if stop is not None and stop.is_set():
+                log("  중단: 사용자 중지.")
+                break
+            if max_pages and pages >= max_pages:
+                break
+            # 왜 멈췄는지 남긴다. 셀렉터 오타로 1페이지만 받고 끝나는 게 가장 흔한 사고다.
+            why = goto_next(page, next_sel, timeout)
+            if why:
+                hint = " 셀렉터를 --probe 로 확인하라." if pages == 1 else ""
+                log(f"  중단: {why}{hint}")
+                break
+            new = wait_change(page, sel, current, timeout, read)
+            if new is None:
+                log(f"  중단: next 클릭 후 {timeout}ms 동안 수집 대상이 바뀌지 않았다."
+                    " 마지막 페이지거나, 로딩이 느리면 --timeout 을 늘려야 한다.")
+                break
+            if images:
+                # 바뀐 것만 보고 넘어가면 아직 주소가 안 붙은 지연 이미지를 놓친다.
+                scroll_all(page)
+                new = read(page, sel, timeout)
+            current = new
+            if delay:
+                page.wait_for_timeout(delay)
+        browser.close()
+    return pages
+
+
+# 셀렉터를 맞추는 게 이 도구의 유일한 삽질 지점이라, 후보를 찾아주는 진단 모드를 둔다.
+_NEXT_CANDIDATES_JS = """() => {
+  const sel = el => el.id ? '#' + el.id
+    : (typeof el.className === 'string' && el.className.trim()
+        ? el.tagName.toLowerCase() + '.' + el.className.trim().split(/\\s+/).join('.')
+        : el.tagName.toLowerCase());
+  const pat = /다음|next|더보기|▶|›|»|→|>>/i;
+  return [...document.querySelectorAll('a, button, input[type=button], input[type=submit]')]
+    .filter(e => pat.test((e.innerText || '') + ' ' + (e.title || '') + ' ' + (e.className || '') + ' ' + (e.value || '')))
+    .slice(0, 10)
+    .map(e => ({ sel: sel(e), text: (e.innerText || e.value || '').trim().slice(0, 20), href: (e.getAttribute('href') || '').slice(0, 60) }));
+}"""
+
+_TEXT_CANDIDATES_JS = """() => {
+  const sel = el => el.id ? '#' + el.id
+    : (typeof el.className === 'string' && el.className.trim()
+        ? el.tagName.toLowerCase() + '.' + el.className.trim().split(/\\s+/).join('.')
+        : el.tagName.toLowerCase());
+  return [...document.querySelectorAll('div, article, section, td, p')]
+    .map(e => ({ sel: sel(e), len: (e.innerText || '').trim().length }))
+    .filter(x => x.len > 200)
+    .sort((a, b) => a.len - b.len)   // 가장 짧은 쪽이 본문에 가장 가까운 컨테이너다
+    .slice(0, 6);
+}"""
+
+_IMAGE_CANDIDATES_JS = """() => {
+  const sel = el => el.id ? '#' + el.id
+    : (typeof el.className === 'string' && el.className.trim()
+        ? el.tagName.toLowerCase() + '.' + el.className.trim().split(/\\s+/).join('.')
+        : el.tagName.toLowerCase());
+  const byParent = new Map();
+  for (const img of document.querySelectorAll('img')) {
+    const p = img.parentElement;
+    if (!p) continue;
+    const k = sel(p);
+    const v = byParent.get(k) || { sel: k + ' img', n: 0, big: 0 };
+    v.n++;
+    if (img.naturalWidth >= 300) v.big++;
+    byParent.set(k, v);
+  }
+  return [...byParent.values()].sort((a, b) => b.big - a.big || b.n - a.n).slice(0, 6);
+}"""
+
+
+def probe(url, sel, next_sel, timeout=15000, headful=False, title_sel=None, delay=0,
+          on_log=None, pause=input):
+    log = on_log or print
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not headful)
+        page = browser.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+        page.wait_for_timeout(1500 + delay)  # 지연 렌더되는 본문을 놓치지 않도록. 더 느리면 --delay 로 늘린다.
+        scroll_all(page)
+
+        for name, s in (("-t 수집 대상", sel), ("-n next", next_sel), ("-T 제목", title_sel)):
+            if not s:
+                continue
+            loc = page.locator(s)
+            cnt = loc.count()
+            log(f"\n{name} {s!r} -> {cnt}개 매치")
+            for i in range(min(cnt, 3)):
+                el = loc.nth(i)
+                preview = el.get_attribute("src") or el.inner_text() or ""
+                log(f"    [{i}] {' '.join(preview.split())[:70]!r}")
+
+        frames = [f for f in page.frames if f != page.main_frame]
+        if frames:
+            log(f"\n주의: iframe {len(frames)}개. 본문이 그 안에 있으면 이 스크립트로는 못 잡는다.")
+            for f in frames[:5]:
+                log(f"    {f.url[:90]}")
+
+        log("\n[next 버튼 후보]")
+        for c in page.evaluate(_NEXT_CANDIDATES_JS):
+            log(f"    {c['sel']:<40} text={c['text']!r} href={c['href']!r}")
+
+        log("\n[본문 후보 - 짧은 쪽이 본문일 확률이 높다]")
+        for c in page.evaluate(_TEXT_CANDIDATES_JS):
+            log(f"    {c['sel']:<40} {c['len']}자")
+
+        log("\n[이미지 후보 - 큰 이미지가 많은 쪽이 본문일 확률이 높다]")
+        for c in page.evaluate(_IMAGE_CANDIDATES_JS):
+            log(f"    {c['sel']:<40} {c['n']}장 (300px 이상 {c['big']}장)")
+
+        if headful:
+            log("\n창을 확인한 뒤 계속...")
+            pause()
+        browser.close()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("url")
+    ap.add_argument("-m", "--mode", choices=("text", "image"), default="text",
+                    help="text=본문을 txt 로 저장, image=이미지를 받아 저장")
+    ap.add_argument("-t", "--text", dest="sel",
+                    help="수집 대상 셀렉터. text 모드는 본문, image 모드는 이미지 (예: #c img)")
+    ap.add_argument("-n", "--next", help="next 버튼 셀렉터")
+    ap.add_argument("-T", "--title", help='제목 셀렉터. text 모드에서 첫 줄에 "{n}화. {제목}" + 빈 줄을 붙인다')
+    ap.add_argument("-o", "--prefix", default="page", help="저장 경로 접두사, {prefix}_0001.txt 로 쓴다")
+    ap.add_argument("--max", type=int, default=0, help="최대 페이지 수 (0=끝까지)")
+    ap.add_argument("--timeout", type=int, default=15000, help="ms")
+    ap.add_argument("--delay", type=int, default=0, help="페이지 간 대기 ms (--probe 에서는 렌더 추가 대기)")
+    ap.add_argument("--headful", action="store_true", help="브라우저 창을 띄운다")
+    ap.add_argument("--digits", type=int, default=4, help="번호 자릿수 (기본 4 -> _0001)")
+    ap.add_argument("--start", type=int, default=1, help="시작 번호 (기본 1)")
+    ap.add_argument("--probe", action="store_true", help="저장하지 않고 셀렉터 매치 수와 후보만 출력")
+    a = ap.parse_args()
+
+    if not a.probe and (not a.sel or not a.next):
+        ap.error("-t 와 -n 이 필요하다. 셀렉터를 모르면 --probe 로 먼저 찾아라.")
+
+    try:
+        if a.probe:
+            probe(a.url, a.sel, a.next, a.timeout, a.headful, a.title, a.delay)
+            return
+        n = scrape(a.url, a.sel, a.next, a.prefix, a.max, a.timeout, a.headful, a.delay,
+                   a.digits, a.start, a.title, a.mode)
+    except PWError as e:
+        # 스택트레이스보다 "무엇을 확인하라"가 쓸모 있다. 대부분 셀렉터 오타 아니면 접속 실패다.
+        print("실패:", str(e).splitlines()[0], file=sys.stderr)
+        print("  - --probe 로 셀렉터가 몇 개 잡히는지 먼저 확인", file=sys.stderr)
+        print("  - 페이지가 느리면 --timeout 60000", file=sys.stderr)
+        print("  - 접속 자체가 안 되면 브라우저에서 URL 이 열리는지 확인", file=sys.stderr)
+        print("  - CONNECTION_RESET 은 스크립트 문제가 아니다. 그 도메인이 차단된 것일 수 있다.", file=sys.stderr)
+        sys.exit(1)
+    first, last = a.start, a.start + n - 1
+    tail = "_*" if a.mode == "image" else ".txt"
+    print(f"{n}개 페이지 -> {a.prefix}_{first:0{a.digits}d}{tail} ~ {a.prefix}_{last:0{a.digits}d}{tail}")
+
+
+if __name__ == "__main__":
+    main()
