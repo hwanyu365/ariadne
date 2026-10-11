@@ -164,7 +164,11 @@ def test_image_mode_max_pages():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    import test_gui
+
+    found = dict(vars(test_gui))
+    found.update(globals())
+    tests = [v for k, v in sorted(found.items()) if k.startswith("test_") and callable(v)]
     for t in tests:
         t()
         print(f"  ok {t.__name__}")
