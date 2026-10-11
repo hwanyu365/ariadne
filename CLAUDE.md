@@ -122,11 +122,12 @@ python test_scrape.py
   - rebase merge 는 설정상 가능하지만 쓰지 않는다 → PR 의 커밋이 그대로 `main` 에 남는다.
   - 리뷰 대화는 모두 해결한 뒤 merge 한다.
     - 작성자가 직접 resolve 할 수 있어 설정의 강제력은 약하다 → 반영했거나 반영하지 않을 근거를 남긴 뒤에만 resolve 한다.
-  - 브랜치가 최신 `main` 이 아니면 merge 되지 않는다 → GitHub 이 merge 를 막으므로 agent 가 선행 여부를 판정하지 않는다.
-    - 전제는 `required_status_checks.strict` 가 켜져 있는 것이다 → merge 전에 조회해 확인한다. `gh api repos/{owner}/{repo}/branches/main/protection -q .required_status_checks.strict`
-    - 꺼져 있으면 GitHub 이 막아 주지 않는다 → merge 하지 않고 소유자에게 알린다.
-    - 막혔으면 `gh pr update-branch {PR번호}` 로 갱신하고, 이어서 `git pull --ff-only` 로 로컬을 맞춘다 → 원격만 바뀌므로 이후 작업이 낡은 로컬 위에 쌓인다.
-    - 새 head 에서 `verify` 가 다시 통과해야 merge 가 열린다. 시작되지 않거나 pending 에서 멈추면 merge 하지 않고 소유자에게 알린다 → push 주체에 따라 트리거되지 않거나 승인 대기가 된다.
+  - 브랜치가 최신 `main` 이 아니면 merge 되지 않는다 (`required_status_checks.strict`).
+    - **상태를 미리 조회해 분기하지 않는다. `gh pr merge` 의 거부가 신호다.** 조회로 판정하면 조회 실패(권한 부족, 보호 규칙 없음)와 "켜져 있음" 을 구분하는 분기가 또 필요해진다.
+    - 거부되면 `gh pr update-branch {PR번호}` 로 갱신하고 이어서 `git pull --ff-only` 로 로컬을 맞춘다 → 원격만 바뀌므로 이후 작업이 낡은 로컬 위에 쌓인다.
+    - `gh pr checks {PR번호}` 의 `verify` 행이 통과로 바뀌면 다시 merge 한다. 필수가 아닌 체크의 실패는 판정에 넣지 않는다.
+    - `verify` 가 시작되지 않거나 pending 에서 멈추면 merge 하지 않고 소유자에게 알린다 → push 주체에 따라 트리거되지 않거나 승인 대기가 된다.
+    - 두 번째 merge 도 거부되면 사유를 읽고 소유자에게 알린다. 같은 명령을 반복하지 않는다.
 
 ## 문서·주석
 
