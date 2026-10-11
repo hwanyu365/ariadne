@@ -256,7 +256,7 @@ def test_charset_name_checked():
     assert check_charset("  ") is None
     assert check_charset(" utf-8 ") == "utf-8"
     assert check_charset("euc-kr") == "euc-kr"
-    for bad in ("nope", "utf-8\r\nx-evil: 1"):
+    for bad in ("nope", "utf-8\r\nx-evil: 1", "utf\r\n8", "utf 8", "base64"):
         try:
             check_charset(bad)
         except ValueError as e:

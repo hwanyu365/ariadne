@@ -5,6 +5,7 @@ import base64
 import codecs
 import json
 import mimetypes
+import re
 import sys
 import time
 from pathlib import Path
@@ -29,8 +30,11 @@ def check_charset(name):
     name = name.strip()
     if not name:
         return None
+    # codecs 는 이름의 공백·개행을 _ 로 정규화해 받아 준다 → 헤더에 넣기 전에 문자 집합부터 거른다.
+    if not re.fullmatch(r"[A-Za-z0-9._:-]+", name):
+        raise ValueError(f"알 수 없는 인코딩: {name!r} (예: utf-8, euc-kr)")
     try:
-        codecs.lookup(name)
+        "".encode(name)                     # 모르는 이름과 base64 같은 비텍스트 코덱을 함께 거부한다
     except LookupError:
         raise ValueError(f"알 수 없는 인코딩: {name!r} (예: utf-8, euc-kr)") from None
     return name
