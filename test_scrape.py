@@ -265,6 +265,32 @@ def test_charset_forced_leaves_iframe_alone():
     assert inner == "광고 가나다", inner
 
 
+def test_charset_failure_falls_back_to_original():
+    """가로챈 응답을 바꾸다 실패해도 요청을 풀어 원래 응답으로 로드한다. 매달리면 수집이 타임아웃으로 끝난다."""
+    from playwright.sync_api import BrowserContext
+
+    class Broken:
+        def __init__(self, real):
+            self.real = real
+
+        def on(self, event, handler):
+            self.real.on(event, handler)
+
+        def send(self, method, params=None):
+            if method == "Fetch.getResponseBody":
+                raise RuntimeError("고장")
+            return self.real.send(method, params)
+
+    orig = BrowserContext.new_cdp_session
+    BrowserContext.new_cdp_session = lambda self, page: Broken(orig(self, page))
+    try:
+        n, texts, _ = _run_undeclared(charset="utf-8")
+    finally:
+        BrowserContext.new_cdp_session = orig
+    assert n == 2, n
+    assert texts[0] != "본문 1 가나다", texts      # 지정이 빠진 원래 응답이다
+
+
 def test_charset_forced_reads_gzip_response():
     """압축된 응답도 지정한 인코딩으로 읽는다."""
     n, texts, _ = _run_undeclared(_GzipHandler, charset="utf-8")

@@ -70,8 +70,8 @@ def new_page(browser, charset=None):
             if ev.get("frameId") == main and 200 <= (ev.get("responseStatusCode") or 0) < 300:
                 cdp.send("Fetch.fulfillRequest", forced(rid, ev))
                 return
-        except PWError:
-            pass                      # 멈춘 요청은 풀어 주지 않으면 타임아웃까지 매달린다 → 원래대로 보낸다
+        except Exception:
+            pass                      # 멈춘 요청은 풀어 주지 않으면 타임아웃까지 매달린다 → 실패 종류와 무관하게 원래대로 보낸다
         cdp.send("Fetch.continueRequest", {"requestId": rid})
 
     def forced(rid, ev):
