@@ -106,7 +106,7 @@ python test_scrape.py
   - 태그: feat `[요구사항][구현사항]`, bugfix `[문제현상][원인][수정사항]`, chore 는 태그 없이 내용
   - 하위 이슈는 1행에 `[GH-{상위}][GH-{하위}]`, `[ISSUE]` 는 상위 이슈 URL
 - PR 은 draft 로 만들고 `.github/pull_request_template.md` 를 채운다. 본문은 최종 커밋 기준으로 갱신한다.
-- `main` 은 보호 브랜치다. 관리자도 예외가 아니므로 agent 와 저장소 소유자 모두 아래를 우회할 수 없다.
+- `main` 은 보호 브랜치다. `enforce_admins` 가 켜져 있어 관리자 권한으로도 아래를 건너뛰고 push·merge 할 수 없다.
   - CI `verify` 통과와 PR 경유가 필수다 → `main` 직접 push 는 거부된다.
   - 리뷰 승인은 0건이어도 merge 할 수 있다. 단독 저장소라 승인자를 둘 수 없다.
     - 아래 자율 범위 절이 요구하는 소유자 approve 도 설정이 강제하지 않는 관례다.
@@ -115,6 +115,7 @@ python test_scrape.py
   - 올리는 방식은 squash merge 로 한다.
   - rebase merge 는 설정상 가능하지만 쓰지 않는다 → PR 의 커밋이 그대로 `main` 에 남는다.
   - 리뷰 대화는 모두 해결한 뒤 merge 한다.
+    - 작성자가 직접 resolve 할 수 있어 설정의 강제력은 약하다 → 반영했거나 반영하지 않을 근거를 남긴 뒤에만 resolve 한다.
   - 브랜치가 최신 `main` 이 아니어도 merge 된다 → `main` 이 앞서간 뒤에는 CI 결과가 낡을 수 있다.
     - 자율 범위 `merge` 에서는 사람이 보지 않으므로, merge 전에 `main` 이 앞섰는지 확인한다.
     - 앞섰으면 브랜치를 갱신해 `verify` 를 다시 통과시킨 뒤 merge 한다.
