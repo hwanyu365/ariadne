@@ -114,6 +114,7 @@ python test_scrape.py
   - 올리는 방식은 squash merge 로 한다.
   - rebase merge 는 설정상 가능하지만 쓰지 않는다 → PR 의 커밋이 그대로 `main` 에 남는다.
   - 리뷰 대화는 모두 해결한 뒤 merge 한다.
+  - 브랜치가 최신 `main` 이 아니어도 merge 된다 → `main` 이 앞서간 뒤에는 CI 결과가 낡을 수 있다.
 
 ## 문서·주석
 
