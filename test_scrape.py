@@ -8,7 +8,9 @@ import tempfile
 import threading
 from pathlib import Path
 
-from scrape import check_charset, probe, scrape
+from playwright.sync_api import sync_playwright
+
+from scrape import check_charset, new_page, probe, scrape
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"fixture" * 4
 
@@ -227,6 +229,40 @@ def test_charset_alias_applied_not_warned():
     for name in ("gb2312", "latin1", "us-ascii"):
         _, _, logs = _run_undeclared(charset=name)
         assert not any("경고" in line for line in logs), (name, logs)
+
+
+def test_charset_forced_overrides_wrong_declaration():
+    """EUC-KR 바이트를 utf-8 로 잘못 선언한 페이지도 지정한 인코딩으로 읽는다. 원본 바이트가 그대로 넘어가야 맞는다."""
+    def write(d):
+        (d / "w.html").write_bytes('<meta charset="utf-8"><body><div id=c>본문 가나다</div></body>'.encode("euc-kr"))
+    texts = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        write(d)
+        with _serve(d) as base:
+            for cs in (None, "euc-kr"):
+                scrape(f"{base}/w.html", "#c", ".next", str(d / str(cs) / "p"), timeout=5000,
+                       charset=cs, on_log=lambda _: None)
+                texts[cs] = (d / str(cs) / "p_0001.txt").read_text(encoding="utf-8")
+    assert texts[None] != "본문 가나다", texts      # 선언을 따르면 실제로 깨지는지
+    assert texts["euc-kr"] == "본문 가나다", texts
+
+
+def test_charset_forced_leaves_iframe_alone():
+    """지정은 메인 문서에만 건다. 인코딩이 다른 iframe 까지 덮으면 그쪽이 깨진다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "outer.html").write_bytes('<body><div id=c>본문 가나다</div><iframe src="inner.html"></iframe></body>'.encode())
+        (d / "inner.html").write_bytes('<meta charset="euc-kr"><body><div id=i>광고 가나다</div></body>'.encode("euc-kr"))
+        with _serve(d) as base, sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = new_page(browser, "utf-8")
+            page.goto(f"{base}/outer.html", wait_until="load")
+            outer = page.inner_text("#c")
+            inner = page.frames[1].inner_text("#i")
+            browser.close()
+    assert outer == "본문 가나다", outer
+    assert inner == "광고 가나다", inner
 
 
 def test_charset_forced_reads_gzip_response():

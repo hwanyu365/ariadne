@@ -61,28 +61,31 @@ def new_page(browser, charset=None):
     # page.route 는 리다이렉트 체인의 첫 요청만 가로챈다 → 리다이렉트를 거친 문서가 빠진다.
     # CDP Fetch 는 체인의 요청마다 응답 단계에서 멈춘다. 헤더만 바꾸는 continueResponse 는 디코딩에 반영되지 않아 본문째 넘긴다.
     cdp = page.context.new_cdp_session(page)
+    # 인코딩이 다른 iframe 까지 덮으면 그쪽이 깨진다 → 메인 프레임 문서만 바꾼다.
+    main = cdp.send("Page.getFrameTree")["frameTree"]["frame"]["id"]
 
     def paused(ev):
         rid = ev["requestId"]
-        if not 200 <= (ev.get("responseStatusCode") or 0) < 300:
-            cdp.send("Fetch.continueRequest", {"requestId": rid})
-            return
         try:
-            got = cdp.send("Fetch.getResponseBody", {"requestId": rid})
+            if ev.get("frameId") == main and 200 <= (ev.get("responseStatusCode") or 0) < 300:
+                cdp.send("Fetch.fulfillRequest", forced(rid, ev))
+                return
         except PWError:
-            # 멈춘 요청은 풀어 주지 않으면 타임아웃까지 매달린다. 본문이 없으면 바꿀 것도 없다.
-            cdp.send("Fetch.continueRequest", {"requestId": rid})
-            return
+            pass                      # 멈춘 요청은 풀어 주지 않으면 타임아웃까지 매달린다 → 원래대로 보낸다
+        cdp.send("Fetch.continueRequest", {"requestId": rid})
+
+    def forced(rid, ev):
+        got = cdp.send("Fetch.getResponseBody", {"requestId": rid})
         body = got["body"] if got["base64Encoded"] else base64.b64encode(got["body"].encode()).decode()
         headers, mime = [], "text/html"
         for h in ev.get("responseHeaders", []):
-            if h["name"].lower() == "content-type":
+            name = h["name"].lower()
+            if name == "content-type":
                 mime = h["value"].split(";")[0].strip() or mime
-            else:
+            elif name not in ("content-encoding", "content-length"):   # 받은 본문은 이미 압축이 풀려 있다
                 headers.append(h)
         headers.append({"name": "Content-Type", "value": f"{mime}; charset={charset}"})
-        cdp.send("Fetch.fulfillRequest", {"requestId": rid, "responseCode": ev["responseStatusCode"],
-                                          "responseHeaders": headers, "body": body})
+        return {"requestId": rid, "responseCode": ev["responseStatusCode"], "responseHeaders": headers, "body": body}
 
     cdp.on("Fetch.requestPaused", paused)
     cdp.send("Fetch.enable", {"patterns": [{"resourceType": "Document", "requestStage": "Response"}]})
