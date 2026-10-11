@@ -2,12 +2,13 @@
 
 import contextlib
 import functools
+import gzip
 import http.server
 import tempfile
 import threading
 from pathlib import Path
 
-from scrape import scrape
+from scrape import check_charset, probe, scrape
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"fixture" * 4
 
@@ -58,10 +59,28 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+class _GzipHandler(_QuietHandler):
+    """실제 사이트처럼 gzip 으로 보낸다. 디렉터리 주소의 301 은 그대로 둔다."""
+
+    def do_GET(self):
+        path = Path(self.translate_path(self.path))
+        if path.is_dir() and not self.path.endswith("/"):
+            return super().do_GET()
+        if path.is_dir():
+            path = path / "index.html"
+        body = gzip.compress(path.read_bytes())
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Encoding", "gzip")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 @contextlib.contextmanager
-def _serve(directory: Path):
+def _serve(directory: Path, handler_cls=_QuietHandler):
     """이미지 다운로드는 실제 HTTP 응답으로 확인한다. file:// 로는 브라우저 request 가 본문을 받지 못한다."""
-    handler = functools.partial(_QuietHandler, directory=str(directory))
+    handler = functools.partial(handler_cls, directory=str(directory))
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
@@ -69,6 +88,28 @@ def _serve(directory: Path):
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def _write_undeclared_utf8(d: Path):
+    """charset 선언 없는 UTF-8 페이지. 디렉터리 주소로 열면 서버가 슬래시를 붙이는 301 을 먼저 돌려준다."""
+    ep = d / "ep"
+    ep.mkdir()
+    (ep / "index.html").write_bytes(
+        '<body><div id=c>본문 1 가나다</div><a class="next" href="p2.html">next</a></body>'.encode())
+    (ep / "p2.html").write_bytes(
+        '<body><div id=c>본문 2 가나다</div><a class="next" aria-disabled="true">next</a></body>'.encode())
+
+
+def _run_undeclared(handler_cls=_QuietHandler, **kw):
+    logs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        _write_undeclared_utf8(d)
+        with _serve(d, handler_cls) as base:
+            n = scrape(f"{base}/ep", "#c", ".next", str(d / "out" / "p"), timeout=5000,
+                       on_log=logs.append, **kw)
+        texts = [f.read_text(encoding="utf-8") for f in sorted((d / "out").glob("p_*.txt"))]
+        return n, texts, logs
 
 
 def _run(make, **kw):
@@ -156,6 +197,65 @@ def test_image_mode_reads_data_src():
     assert pages == 2, pages
     assert names == ["p_0001_001.png", "p_0001_002.png", "p_0002_001.png", "p_0002_002.png"], names
     assert all(b == PNG for b in blobs), [len(b) for b in blobs]
+
+
+def test_charset_undeclared_utf8_warns():
+    """선언 없는 UTF-8 은 깨진 채 받아진다 → 조용히 끝나지 않고 로그로 알린다."""
+    n, texts, logs = _run_undeclared()
+    assert n == 2, n
+    assert texts[0] != "본문 1 가나다", texts      # 픽스처가 실제로 추정을 틀리게 만드는지
+    assert any("windows-1252" in line for line in logs), logs
+
+
+def test_charset_forced_reads_undeclared_utf8():
+    """인코딩을 지정하면 리다이렉트와 링크 이동을 거쳐도 모든 페이지를 그 인코딩으로 읽는다."""
+    n, texts, logs = _run_undeclared(charset="utf-8")
+    assert n == 2, n
+    assert texts == ["본문 1 가나다", "본문 2 가나다"], texts
+    assert not any("windows-1252" in line for line in logs), logs
+
+
+def test_charset_ignored_by_browser_warns():
+    """파이썬은 알지만 브라우저는 모르는 이름이면 지정이 무시된다 → 조용히 추정으로 돌아가지 않고 알린다."""
+    _, texts, logs = _run_undeclared(charset="u8")
+    assert texts[0] != "본문 1 가나다", texts      # 브라우저가 실제로 지정을 무시하는지
+    assert any("u8" in line and "windows-1252" in line for line in logs), logs
+
+
+def test_charset_forced_reads_gzip_response():
+    """압축된 응답도 지정한 인코딩으로 읽는다."""
+    n, texts, _ = _run_undeclared(_GzipHandler, charset="utf-8")
+    assert n == 2, n
+    assert texts == ["본문 1 가나다", "본문 2 가나다"], texts
+
+
+def test_probe_reports_charset():
+    """probe 는 추정 인코딩을 보여 주고, 지정하면 미리보기부터 바로 읽힌다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        _write_undeclared_utf8(d)
+        with _serve(d) as base:
+            guessed, forced = [], []
+            probe(f"{base}/ep", "#c", None, timeout=5000, on_log=guessed.append)
+            probe(f"{base}/ep", "#c", None, timeout=5000, on_log=forced.append, charset="utf-8")
+    assert any("인코딩: windows-1252" in line for line in guessed), guessed
+    assert any("경고" in line and "windows-1252" in line for line in guessed), guessed
+    assert any("인코딩: UTF-8" in line for line in forced), forced
+    assert any("본문 1 가나다" in line for line in forced), forced
+    assert not any("경고" in line for line in forced), forced
+
+
+def test_charset_name_checked():
+    assert check_charset("  ") is None
+    assert check_charset(" utf-8 ") == "utf-8"
+    assert check_charset("euc-kr") == "euc-kr"
+    for bad in ("nope", "utf-8\r\nx-evil: 1"):
+        try:
+            check_charset(bad)
+        except ValueError as e:
+            assert "인코딩" in str(e), e
+        else:
+            raise AssertionError(bad)
 
 
 def test_image_mode_max_pages():

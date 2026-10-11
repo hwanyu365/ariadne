@@ -12,6 +12,7 @@ TEXT_FIELDS = [
     ("sel", "수집 대상 셀렉터"),
     ("next", "next 버튼 셀렉터"),
     ("title", "제목 셀렉터 (텍스트 모드, 선택)"),
+    ("charset", "인코딩 (비우면 브라우저 추정)"),
     ("prefix", "저장 경로 접두사"),
 ]
 
@@ -59,6 +60,7 @@ def parse_inputs(raw, probe):
         raise ValueError("URL 을 입력하라.")
     if not probe and not (text["sel"] and text["next"]):
         raise ValueError("수집 대상과 next 셀렉터가 필요하다. 모르면 probe 로 후보를 먼저 보라.")
+    text["charset"] = core.check_charset(text["charset"])
     nums = {}
     for key, label, _ in NUM_FIELDS:
         value = raw[key].strip() or "0"
@@ -188,7 +190,7 @@ class App:
         try:
             core.pick(text["url"], self.q.put, timeout=nums["timeout"],
                       targets=(first, "next", "제목"), on_log=log,
-                      should_stop=self.stop.is_set)
+                      should_stop=self.stop.is_set, charset=text["charset"])
         except Exception as e:
             log(f"실패: {type(e).__name__}: {str(e).splitlines()[0]}")
         finally:
@@ -213,14 +215,14 @@ class App:
                 core.probe(text["url"], text["sel"] or None, text["next"] or None,
                            timeout=nums["timeout"], headful=self.headful.get(),
                            title_sel=text["title"] or None, delay=nums["delay"],
-                           on_log=log, pause=self.stop.wait)
+                           on_log=log, pause=self.stop.wait, charset=text["charset"])
             else:
                 n = core.scrape(text["url"], text["sel"], text["next"], text["prefix"],
                                 max_pages=nums["max"], timeout=nums["timeout"],
                                 headful=self.headful.get(), delay=nums["delay"],
                                 digits=nums["digits"], start=nums["start"],
                                 title_sel=text["title"] or None, mode=self.mode.get(),
-                                on_log=log, stop=self.stop)
+                                on_log=log, stop=self.stop, charset=text["charset"])
                 log(f"완료: {n}개 페이지")
         except Exception as e:
             # 워커에서 죽으면 창이 멈춘 것처럼 보인다. 사유를 로그로 돌려주고 버튼을 되살린다.
