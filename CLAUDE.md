@@ -106,6 +106,10 @@ python test_scrape.py
   - 태그: feat `[요구사항][구현사항]`, bugfix `[문제현상][원인][수정사항]`, chore 는 태그 없이 내용
   - 하위 이슈는 1행에 `[GH-{상위}][GH-{하위}]`, `[ISSUE]` 는 상위 이슈 URL
 - PR 은 draft 로 만들고 `.github/pull_request_template.md` 를 채운다. 본문은 최종 커밋 기준으로 갱신한다.
+- **코드 변경은 세션이 직접 커밋한다. `@claude` 에게 맡기지 않는다.**
+  - `claude-code-action` 의 push 는 actor 가 `github-actions[bot]` 으로 기록된다 → 워크플로가 승인 대기(`action_required`)가 되고 리뷰는 bot actor 로 거부된다.
+  - 커밋 author 는 `claude[bot]` 으로 찍히지만 그 주소의 ID 는 `github-actions[bot]` 의 것이다 → author 로 actor 를 짐작할 수 없다.
+  - `@claude` 는 이슈·PR 에서 묻고 답받는 데 쓴다. 작업 품질과 무관한 제약이다.
 - **후속으로 미룬 것과 확인하지 못한 것은 merge 전에 이슈로 등록한다.** 세션은 끝나면 사라지므로 다음 세션이 이어받을 자리는 이슈뿐이다.
   - 미루는 것이 기본은 아니다. 리뷰에서 후속으로 분류될 항목은 애초에 그 PR 안에 있어야 한다.
   - 그래도 남는 것: 리뷰가 후속으로 분류한 항목, 소유자 판단을 기다리는 설정·정책, 실행하지 못한 검증.
@@ -117,11 +121,9 @@ python test_scrape.py
   - 리뷰 승인은 0건이어도 merge 할 수 있다. 단독 저장소라 승인자를 둘 수 없다.
     - 아래 자율 범위 절이 요구하는 소유자 approve 도 설정이 강제하지 않는 관례다.
   - force push 와 브랜치 삭제는 금지다.
-  - linear history 가 필수다 → merge commit 은 거부된다.
-  - 올리는 방식은 squash merge 로 한다.
-  - rebase merge 는 설정상 가능하지만 쓰지 않는다 → PR 의 커밋이 그대로 `main` 에 남는다.
-  - 리뷰 대화는 모두 해결한 뒤 merge 한다.
-    - 작성자가 직접 resolve 할 수 있어 설정의 강제력은 약하다 → 반영했거나 반영하지 않을 근거를 남긴 뒤에만 resolve 한다.
+  - 올리는 방식은 squash merge 로 한다. 설정은 rebase·merge commit 도 열어 두지만 쓰지 않는다 → PR 의 커밋이나 merge commit 이 `main` 에 남는다.
+  - 리뷰 지적은 조사해 사실인 것만 반영하고, 반영하지 않은 것은 근거를 남긴다. 미해결 대화가 merge 를 막지는 않는다.
+    - 막게 하면(`required_conversation_resolution`) 지적 하나하나가 차단 요건이 되고, 반영 push 가 다시 리뷰를 깨워 라운드가 끝나지 않는다.
   - 브랜치가 최신 `main` 이 아니면 merge 되지 않는다 (`required_status_checks.strict`).
     - **상태를 미리 조회해 분기하지 않는다. `gh pr merge` 의 거부가 신호다.** 조회로 판정하면 조회 실패(권한 부족, 보호 규칙 없음)와 "켜져 있음" 을 구분하는 분기가 또 필요해진다.
     - 거부되면 `gh pr update-branch {PR번호}` 로 갱신하고 이어서 `git pull --ff-only` 로 로컬을 맞춘다 → 원격만 바뀌므로 이후 작업이 낡은 로컬 위에 쌓인다.
