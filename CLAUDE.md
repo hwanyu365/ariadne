@@ -109,12 +109,15 @@ python test_scrape.py
 - `main` 은 보호 브랜치다. 관리자도 예외가 아니므로 agent 와 저장소 소유자 모두 아래를 우회할 수 없다.
   - CI `verify` 통과와 PR 경유가 필수다 → `main` 직접 push 는 거부된다.
   - 리뷰 승인은 0건이어도 merge 할 수 있다. 단독 저장소라 승인자를 둘 수 없다.
+    - 아래 자율 범위 절이 요구하는 소유자 approve 도 설정이 강제하지 않는 관례다.
   - force push 와 브랜치 삭제는 금지다.
   - linear history 가 필수다 → merge commit 은 거부된다.
   - 올리는 방식은 squash merge 로 한다.
   - rebase merge 는 설정상 가능하지만 쓰지 않는다 → PR 의 커밋이 그대로 `main` 에 남는다.
   - 리뷰 대화는 모두 해결한 뒤 merge 한다.
   - 브랜치가 최신 `main` 이 아니어도 merge 된다 → `main` 이 앞서간 뒤에는 CI 결과가 낡을 수 있다.
+    - 자율 범위 `merge` 에서는 사람이 보지 않으므로, merge 전에 `main` 이 앞섰는지 확인한다.
+    - 앞섰으면 브랜치를 갱신해 `verify` 를 다시 통과시킨 뒤 merge 한다.
 
 ## 문서·주석
 
