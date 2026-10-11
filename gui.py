@@ -23,6 +23,9 @@ NUM_FIELDS = [
     ("delay", "페이지 간 대기 ms", "0"),
 ]
 
+# 선택기 툴바의 대상 이름을 입력란에 잇는다. 이미지 모드는 같은 칸에 이미지 셀렉터를 받는다.
+PICK_TARGETS = {"본문": "sel", "이미지": "sel", "next": "next", "제목": "title"}
+
 HINT = {
     "text": "본문이 들어 있는 컨테이너 (예: #articleBody)",
     "image": "이미지 요소까지 지정한다 (예: #articleBody img)",
@@ -87,10 +90,11 @@ class App:
         self.headful = tk.BooleanVar(value=False)
         ttk.Checkbutton(row, text="브라우저 창 띄우기", variable=self.headful).pack(side="left", padx=12)
 
+        self.btn_pick = ttk.Button(row, text="요소 선택", command=self._start_pick)
         self.btn_probe = ttk.Button(row, text="probe", command=lambda: self._start(probe=True))
         self.btn_run = ttk.Button(row, text="수집 시작", command=lambda: self._start(probe=False))
         self.btn_stop = ttk.Button(row, text="중지", command=self.stop.set, state="disabled")
-        for b in (self.btn_probe, self.btn_run, self.btn_stop):
+        for b in (self.btn_pick, self.btn_probe, self.btn_run, self.btn_stop):
             b.pack(side="left", padx=4)
 
         self.log = scrolledtext.ScrolledText(root, height=20, wrap="word")
@@ -117,6 +121,8 @@ class App:
                 msg = self.q.get_nowait()
                 if msg is None:
                     self._set_running(False)
+                elif isinstance(msg, dict):
+                    self._apply_pick(msg)
                 else:
                     self._write(msg)
         except queue.Empty:
@@ -125,12 +131,44 @@ class App:
 
     def _set_running(self, running):
         state = "disabled" if running else "normal"
+        self.btn_pick.config(state=state)
         self.btn_probe.config(state=state)
         self.btn_run.config(state=state)
         self.btn_stop.config(state="normal" if running else "disabled")
 
     def _args(self, probe):
         return parse_inputs({k: v.get() for k, v in self.vars.items()}, probe)
+
+    def _apply_pick(self, payload):
+        key = PICK_TARGETS.get(payload.get("target"))
+        if not key:
+            return
+        self.vars[key].set(payload.get("sel", ""))
+        cands = "  ".join(f"{c['sel']}({c['n']})" for c in payload.get("candidates", ()))
+        self._write(f"[{payload['target']}] {payload.get('sel', '')}   후보: {cands}")
+
+    def _start_pick(self):
+        self.log.delete("1.0", "end")
+        try:
+            text, nums = self._args(probe=True)        # 선택기는 URL 만 있으면 된다
+        except ValueError as e:
+            self._write(str(e))
+            return
+        self.stop.clear()
+        self._set_running(True)
+        threading.Thread(target=self._run_pick, args=(text, nums), daemon=True).start()
+
+    def _run_pick(self, text, nums):
+        log = self.q.put
+        first = "이미지" if self.mode.get() == "image" else "본문"
+        try:
+            core.pick(text["url"], self.q.put, timeout=nums["timeout"],
+                      targets=(first, "next", "제목"), on_log=log,
+                      should_stop=self.stop.is_set)
+        except Exception as e:
+            log(f"실패: {type(e).__name__}: {str(e).splitlines()[0]}")
+        finally:
+            log(None)
 
     def _start(self, probe):
         self.log.delete("1.0", "end")
