@@ -209,6 +209,19 @@ def test_charset_undeclared_utf8_warns():
     assert any("windows-1252" in line for line in logs), logs
 
 
+def test_charset_warns_when_later_page_undeclared():
+    """첫 페이지가 정상이어도 이후 페이지에서 추정이 틀리면 알린다."""
+    logs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "a.html").write_bytes('<meta charset="utf-8"><div id=c>본문 1</div><a class="next" href="b.html">n</a>'.encode())
+        (d / "b.html").write_bytes('<div id=c>본문 2</div><a class="next" aria-disabled="true">n</a>'.encode())
+        with _serve(d) as base:
+            n = scrape(f"{base}/a.html", "#c", ".next", str(d / "out" / "p"), timeout=5000, on_log=logs.append)
+    assert n == 2, n
+    assert sum("windows-1252" in line for line in logs) == 1, logs
+
+
 def test_charset_forced_reads_undeclared_utf8():
     """인코딩을 지정하면 리다이렉트와 링크 이동을 거쳐도 모든 페이지를 그 인코딩으로 읽는다."""
     n, texts, logs = _run_undeclared(charset="utf-8")

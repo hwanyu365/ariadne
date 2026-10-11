@@ -234,9 +234,7 @@ def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False
         if images:
             scroll_all(page)
         current = read(page, sel, timeout)
-        warn = None if images else charset_warning(page, charset)
-        if warn:
-            log(warn)
+        warned = images                  # 이미지는 인코딩과 무관하다
 
         while True:
             pages += 1
@@ -248,6 +246,12 @@ def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False
             else:
                 size, name = save_text(page, current, prefix, num, digits, title_sel, log)
                 log(f"[{pages}] {size}자 -> {name}")
+                if not warned:
+                    # 페이지마다 선언이 다를 수 있어 매번 보되, 같은 경고로 로그를 덮지 않게 한 번만 낸다.
+                    warn = charset_warning(page, charset)
+                    if warn:
+                        log(warn)
+                        warned = True
 
             if stop is not None and stop.is_set():
                 log("  중단: 사용자 중지.")
