@@ -4,7 +4,7 @@ from gui import NUM_FIELDS, parse_inputs, pick_update
 
 
 def _raw(**over):
-    raw = {"url": "http://x", "sel": "#c", "next": ".next", "title": "", "prefix": "out/page"}
+    raw = {"url": "http://x", "sel": "#c", "next": ".next", "title": "", "charset": "", "prefix": "out/page"}
     raw.update({k: d for k, _, d in NUM_FIELDS})
     raw.update(over)
     return raw
@@ -57,6 +57,14 @@ def test_gui_pick_tolerates_broken_candidates():
     for cands in ("엉뚱", None, [{"sel": ".n"}, {"n": 1}, "x"]):
         got = pick_update({"target": "next", "sel": ".n", "candidates": cands})
         assert got[:2] == ("next", ".n"), (cands, got)
+
+
+def test_gui_charset_checked():
+    """비우면 브라우저 추정, 모르는 이름은 시작 전에 거부한다."""
+    assert parse_inputs(_raw(), probe=False)[0]["charset"] is None
+    assert parse_inputs(_raw(charset=" utf-8 "), probe=True)[0]["charset"] == "utf-8"
+    for probe in (True, False):
+        assert "인코딩" in _reason(_raw(charset="nope"), probe), probe
 
 
 def test_gui_valid_input_parsed():

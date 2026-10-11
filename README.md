@@ -27,6 +27,7 @@ python gui.py
 | 수집 대상 셀렉터 | 텍스트 모드는 본문 컨테이너(`#articleBody`), 이미지 모드는 이미지까지(`#articleBody img`) |
 | next 버튼 셀렉터 | 다음 페이지로 가는 요소 |
 | 제목 셀렉터 | 텍스트 모드에서만. 주면 첫 줄에 `{번호}화. {제목}` 을 붙인다 |
+| 인코딩 | 비우면 브라우저가 추정한다. 한글이 깨지면 `utf-8` 처럼 지정한다 → 로그에 windows-1252 경고가 뜨면 이 경우다 |
 | 저장 경로 접두사 | `out/page` → `out/page_0001.txt` |
 
 - **셀렉터를 모를 때는 URL 만 넣고 `요소 선택`** → 브라우저가 뜨고 마우스를 올린 요소가 빨갛게 표시된다. 클릭하면 셀렉터 후보가 매치 수와 함께 뜨고, 고른 것이 입력란에 들어간다.
@@ -46,7 +47,7 @@ python scrape.py <URL> -t '#articleBody' -n '.next' -o out/page  # 텍스트
 python scrape.py <URL> -m image -t '#articleBody img' -n '.next' -o out/img
 ```
 
-`-h` 로 전체 옵션(`--max`, `--start`, `--digits`, `--timeout`, `--delay`, `--headful`)을 본다.
+`-h` 로 전체 옵션(`--max`, `--start`, `--digits`, `--timeout`, `--delay`, `--headful`, `--charset`)을 본다.
 
 ## 안 되는 것
 
