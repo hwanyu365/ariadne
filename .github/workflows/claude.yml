@@ -1,0 +1,59 @@
+name: Claude
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    # 소유자·협업자의 호출만 실행 → 외부인의 토큰 소모와 prompt injection 차단.
+    if: |
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+        github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association) &&
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      # secret 이 없으면(미등록, dependabot·fork 트리거) 실패 대신 건너뛴다.
+      - id: secret
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "::notice::CLAUDE_CODE_OAUTH_TOKEN 미등록 → 건너뜀"; fi
+      - if: steps.secret.outputs.ok == 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      # agent 가 검증 명령을 직접 돌릴 수 있도록 CI 와 같은 런타임을 준비한다.
+      - if: steps.secret.outputs.ok == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - if: steps.secret.outputs.ok == 'true'
+        run: pip install -r requirements.txt
+      - if: steps.secret.outputs.ok == 'true'
+        run: python -m playwright install --with-deps chromium
+      - if: steps.secret.outputs.ok == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          claude_args: |
+            --allowedTools "Bash(git:*),Bash(gh:*),Bash(python:*),Bash(pip:*)"

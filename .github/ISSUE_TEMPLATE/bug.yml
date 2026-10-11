@@ -1,0 +1,32 @@
+name: 버그
+description: 의도와 다르게 동작하는 문제
+labels: [bug]
+body:
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 현상
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 재현 절차
+      description: 이 절차가 재현 테스트(Red)가 된다.
+      placeholder: |
+        1.
+        2.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대 동작
+      description: 스펙 근거가 있으면 ID 를 적는다 (예 FR#3)
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 환경
+      placeholder: 기기·OS·버전

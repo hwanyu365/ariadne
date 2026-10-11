@@ -1,0 +1,31 @@
+name: 기능 요청
+description: 새 기능 또는 기능 변경
+labels: [enhancement]
+body:
+  - type: textarea
+    id: story
+    attributes:
+      label: 사용자 스토리
+      description: "~로서, ~하기 위해, ~을 원한다"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 인수 조건 (Given / When / Then)
+      description: 실패 경로도 함께 적는다. 그대로 TC 가 된다.
+      value: |
+        Given
+        When
+        Then
+    validations:
+      required: true
+  - type: textarea
+    id: spec
+    attributes:
+      label: 관련 스펙
+      description: docs/ 스펙의 관련 ID (FR#, NFR#, §)
+  - type: textarea
+    id: notes
+    attributes:
+      label: 참고
