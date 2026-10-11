@@ -111,7 +111,8 @@ python test_scrape.py
   - 리뷰 승인은 0건이어도 merge 할 수 있다. 단독 저장소라 승인자를 둘 수 없다.
   - force push 와 브랜치 삭제는 금지다.
   - linear history 가 필수다 → merge commit 은 거부된다.
-  - 올리는 방식은 squash merge 로 한다. rebase merge 도 설정은 통과하지만, 커밋을 하나로 모아 올린다.
+  - 올리는 방식은 squash merge 로 한다.
+  - rebase merge 는 설정상 가능하지만 쓰지 않는다 → PR 의 커밋이 그대로 `main` 에 남는다.
   - 리뷰 대화는 모두 해결한 뒤 merge 한다.
 
 ## 문서·주석
