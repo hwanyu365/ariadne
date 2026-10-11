@@ -122,17 +122,9 @@ python test_scrape.py
   - rebase merge 는 설정상 가능하지만 쓰지 않는다 → PR 의 커밋이 그대로 `main` 에 남는다.
   - 리뷰 대화는 모두 해결한 뒤 merge 한다.
     - 작성자가 직접 resolve 할 수 있어 설정의 강제력은 약하다 → 반영했거나 반영하지 않을 근거를 남긴 뒤에만 resolve 한다.
-  - 브랜치가 최신 `main` 이 아니어도 merge 된다 → `main` 이 앞서간 뒤에는 CI 결과가 낡을 수 있다.
-    - 자율 범위 `merge` 에서는 사람이 보지 않으므로, merge 전에 `main` 이 앞섰는지 확인한다.
-      - 확인: `git fetch origin main && git merge-base --is-ancestor origin/main HEAD` → 종료 코드 0 이면 최신, 1 이면 `main` 이 앞섰다.
-      - `fetch` 를 `&&` 로 묶는다. 따로 실행하면 `fetch` 가 실패해도 전에 받아 둔 낡은 `origin/main` 으로 0 이 나와 "최신" 으로 오판한다.
-      - 로컬 `HEAD` 가 PR 의 push 된 head 와 같은지도 본다 → `test "$(git rev-parse HEAD)" = "$(gh pr view {PR번호} --json headRefOid -q .headRefOid)"`
-      - 종료 코드 0·1 이외거나 위 확인이 어긋나면 확인 실패다 → merge 하지 않고 소유자에게 알린다.
-    - 앞섰으면 브랜치를 갱신해 CI `verify` 를 다시 통과시킨 뒤 merge 한다.
-      - 갱신: `gh pr update-branch {PR번호}` → 원격 PR 브랜치만 바뀐다. `git pull --ff-only` 로 로컬을 맞춘 뒤 위 확인을 다시 한다.
-      - 새 head 에서 `verify` 가 통과했는지 본다 → `gh pr checks {PR번호}` 의 `verify` 행만 읽는다. 필수가 아닌 체크의 실패는 판정에 넣지 않는다.
-      - `verify` 행이 없거나 pending·실패면 merge 하지 않고 소유자에게 알린다. push 주체에 따라 워크플로가 트리거되지 않거나 승인 대기가 된다.
-      - CI `verify` 를 다시 통과시키는 것은 보호 규칙이 그것을 요구하기 때문이다 → 로컬 재실행으로 대체할 수 없다.
+  - 브랜치가 최신 `main` 이 아니면 merge 되지 않는다 → GitHub 이 merge 를 막으므로 agent 가 선행 여부를 판정하지 않는다.
+    - 막혔으면 `gh pr update-branch {PR번호}` 로 갱신한다. 새 head 에서 `verify` 가 다시 통과해야 merge 가 열린다.
+    - 로컬도 `git pull --ff-only` 로 맞춘다 → `update-branch` 는 원격 PR 브랜치만 바꾼다.
 
 ## 문서·주석
 
