@@ -123,7 +123,9 @@ python test_scrape.py
   - 리뷰 대화는 모두 해결한 뒤 merge 한다.
     - 작성자가 직접 resolve 할 수 있어 설정의 강제력은 약하다 → 반영했거나 반영하지 않을 근거를 남긴 뒤에만 resolve 한다.
   - 브랜치가 최신 `main` 이 아니면 merge 되지 않는다 → GitHub 이 merge 를 막으므로 agent 가 선행 여부를 판정하지 않는다.
+    - 전제는 `required_status_checks.strict` 가 켜져 있는 것이다. 꺼지면 이 줄이 거짓이 되므로 선행 여부를 직접 확인해야 한다.
     - 막혔으면 `gh pr update-branch {PR번호}` 로 갱신한다. 새 head 에서 `verify` 가 다시 통과해야 merge 가 열린다.
+    - `verify` 가 시작되지 않거나 pending 에서 멈추면 merge 하지 않고 소유자에게 알린다 → push 주체에 따라 트리거되지 않거나 승인 대기가 된다.
     - 로컬도 `git pull --ff-only` 로 맞춘다 → `update-branch` 는 원격 PR 브랜치만 바꾼다.
 
 ## 문서·주석
