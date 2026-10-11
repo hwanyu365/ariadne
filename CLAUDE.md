@@ -129,11 +129,10 @@ python test_scrape.py
       - 로컬 `HEAD` 가 PR 의 push 된 head 와 같은지도 본다 → `test "$(git rev-parse HEAD)" = "$(gh pr view {PR번호} --json headRefOid -q .headRefOid)"`
       - 종료 코드 0·1 이외거나 위 확인이 어긋나면 확인 실패다 → merge 하지 않고 소유자에게 알린다.
     - 앞섰으면 브랜치를 갱신해 CI `verify` 를 다시 통과시킨 뒤 merge 한다.
-      - 갱신: `gh pr update-branch {PR번호}`
-      - 갱신 후 새 head SHA 에서 `verify` 가 시작되어 통과했는지 확인한다 → `gh run list --commit {새 head SHA}`
-      - 시작되지 않으면 merge 하지 않고 소유자에게 알린다. push 주체에 따라 워크플로가 트리거되지 않거나 승인 대기가 된다.
-      - 다시 통과시킬 대상은 CI `verify` 다 → 로컬 `python test_scrape.py` 재실행은 낡은 base 를 해소하지 못한다.
-      - "검증 명령은 하나" 와 어긋나지 않는다 → 로컬 통과는 CI 통과를 뜻하지만, 새 base 에서의 결과는 CI 에서만 얻는다.
+      - 갱신: `gh pr update-branch {PR번호}` → 원격 PR 브랜치만 바뀐다. `git pull --ff-only` 로 로컬을 맞춘 뒤 위 확인을 다시 한다.
+      - 새 head 에서 `verify` 가 통과했는지 본다 → `gh pr checks {PR번호}`
+      - 통과가 뜨지 않으면 merge 하지 않고 소유자에게 알린다. push 주체에 따라 워크플로가 트리거되지 않거나 승인 대기가 된다.
+      - CI `verify` 를 다시 통과시키는 것은 보호 규칙이 그것을 요구하기 때문이다 → 로컬 재실행으로 대체할 수 없다.
 
 ## 문서·주석
 
