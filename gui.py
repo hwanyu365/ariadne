@@ -23,6 +23,29 @@ NUM_FIELDS = [
     ("delay", "페이지 간 대기 ms", "0"),
 ]
 
+# 선택기 툴바의 대상 이름을 입력란에 잇는다. 이미지 모드는 같은 칸에 이미지 셀렉터를 받는다.
+PICK_TARGETS = {"본문": "sel", "이미지": "sel", "next": "next", "제목": "title"}
+
+
+def pick_update(payload):
+    """선택기가 보낸 값을 (입력란 키, 셀렉터, 로그 줄) 로 바꾼다. 맞지 않으면 None.
+
+    `expose_function` 으로 연 창구라 대상 페이지의 스크립트도 호출할 수 있다 → 형태를 전부 확인한다.
+    """
+    if not isinstance(payload, dict):
+        return None
+    target = payload.get("target")
+    key = PICK_TARGETS.get(target) if isinstance(target, str) else None
+    sel = payload.get("sel")
+    if not key or not isinstance(sel, str) or not sel.strip():
+        return None
+    raw = payload.get("candidates")
+    cands = raw if isinstance(raw, list) else []
+    parts = [f"{c['sel']}({c['n']})" for c in cands
+             if isinstance(c, dict) and isinstance(c.get("sel"), str) and isinstance(c.get("n"), int)]
+    tail = f"   후보: {'  '.join(parts)}" if parts else ""
+    return key, sel.strip(), f"[{target}] {sel.strip()}{tail}"
+
 HINT = {
     "text": "본문이 들어 있는 컨테이너 (예: #articleBody)",
     "image": "이미지 요소까지 지정한다 (예: #articleBody img)",
@@ -87,10 +110,11 @@ class App:
         self.headful = tk.BooleanVar(value=False)
         ttk.Checkbutton(row, text="브라우저 창 띄우기", variable=self.headful).pack(side="left", padx=12)
 
+        self.btn_pick = ttk.Button(row, text="요소 선택", command=self._start_pick)
         self.btn_probe = ttk.Button(row, text="probe", command=lambda: self._start(probe=True))
         self.btn_run = ttk.Button(row, text="수집 시작", command=lambda: self._start(probe=False))
         self.btn_stop = ttk.Button(row, text="중지", command=self.stop.set, state="disabled")
-        for b in (self.btn_probe, self.btn_run, self.btn_stop):
+        for b in (self.btn_pick, self.btn_probe, self.btn_run, self.btn_stop):
             b.pack(side="left", padx=4)
 
         self.log = scrolledtext.ScrolledText(root, height=20, wrap="word")
@@ -117,20 +141,58 @@ class App:
                 msg = self.q.get_nowait()
                 if msg is None:
                     self._set_running(False)
+                elif isinstance(msg, dict):
+                    self._apply_pick(msg)
                 else:
                     self._write(msg)
         except queue.Empty:
             pass
-        self.root.after(100, self._drain)
+        except Exception as e:
+            self._write(f"로그 처리 실패: {type(e).__name__}: {e}")
+        finally:
+            # 여기서 끊기면 이후 로그가 영영 안 뜬다. 무슨 일이 있어도 다시 건다.
+            self.root.after(100, self._drain)
 
     def _set_running(self, running):
         state = "disabled" if running else "normal"
+        self.btn_pick.config(state=state)
         self.btn_probe.config(state=state)
         self.btn_run.config(state=state)
         self.btn_stop.config(state="normal" if running else "disabled")
 
     def _args(self, probe):
         return parse_inputs({k: v.get() for k, v in self.vars.items()}, probe)
+
+    def _apply_pick(self, payload):
+        got = pick_update(payload)
+        if not got:
+            return
+        key, sel, line = got
+        self.vars[key].set(sel)
+        self._write(line)
+
+    def _start_pick(self):
+        self.log.delete("1.0", "end")
+        try:
+            text, nums = self._args(probe=True)        # 선택기는 URL 만 있으면 된다
+        except ValueError as e:
+            self._write(str(e))
+            return
+        self.stop.clear()
+        self._set_running(True)
+        threading.Thread(target=self._run_pick, args=(text, nums), daemon=True).start()
+
+    def _run_pick(self, text, nums):
+        log = self.q.put
+        first = "이미지" if self.mode.get() == "image" else "본문"
+        try:
+            core.pick(text["url"], self.q.put, timeout=nums["timeout"],
+                      targets=(first, "next", "제목"), on_log=log,
+                      should_stop=self.stop.is_set)
+        except Exception as e:
+            log(f"실패: {type(e).__name__}: {str(e).splitlines()[0]}")
+        finally:
+            log(None)
 
     def _start(self, probe):
         self.log.delete("1.0", "end")

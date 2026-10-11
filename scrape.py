@@ -1,6 +1,7 @@
 """페이지네이션된 웹 페이지를 끝까지 넘기며 본문 텍스트나 이미지를 로컬 파일로 저장한다."""
 
 import argparse
+import json
 import mimetypes
 import sys
 import time
@@ -244,6 +245,166 @@ _IMAGE_CANDIDATES_JS = """() => {
   }
   return [...byParent.values()].sort((a, b) => b.big - a.big || b.n - a.n).slice(0, 6);
 }"""
+
+
+# 아래 두 JS 는 `data-pagenation-ui` 를 공유한다. 선택기가 붙인 요소를 매치 수와 선택 대상에서 빼는 표식이다.
+# 클릭한 요소 하나에서 셀렉터 후보를 만든다. 매치 수를 함께 내어 상태 클래스가 섞였는지 드러낸다.
+CANDIDATES_JS = """el => {
+  const esc = s => (window.CSS && CSS.escape) ? CSS.escape(s) : s;
+  const classesOf = e => (typeof e.className === 'string'
+    ? e.className.trim().split(/\\s+/).filter(Boolean) : []);
+  const out = [];
+  const add = s => { if (s && out.indexOf(s) < 0) out.push(s); };
+  const tag = el.tagName.toLowerCase();
+
+  if (el.id) add('#' + esc(el.id));
+  const cs = classesOf(el);
+  if (cs.length) {
+    add(tag + '.' + cs.map(esc).join('.'));
+    if (cs.length > 1) add(tag + '.' + esc(cs[0]));   // 상태 클래스가 섞였을 때를 위한 짧은 쪽
+  }
+  if (tag === 'img') {
+    // 이미지는 그 한 장이 아니라 컨테이너를 집어야 다음 페이지에서도 맞는다.
+    const p = el.parentElement;
+    if (p) {
+      if (p.id) add('#' + esc(p.id) + ' img');
+      const pcs = classesOf(p);
+      if (pcs.length) add(p.tagName.toLowerCase() + '.' + pcs.map(esc).join('.') + ' img');
+    }
+  }
+  add(tag);
+
+  const count = s => {
+    try {
+      return Array.prototype.slice.call(document.querySelectorAll(s))
+        .filter(e => !e.closest('[data-pagenation-ui]')).length;
+    } catch (_) { return 0; }
+  };
+  return out.map(sel => ({ sel: sel, n: count(sel) }));
+}"""
+
+# 하이라이트·툴바를 붙이고 클릭을 가로챈다. 페이지 동작을 바꾸지 않도록 전부 fixed 로 띄운다.
+PICKER_JS = """opts => {
+  if (window.__pagenationPicker) return;
+  window.__pagenationPicker = true;
+  const targets = (opts && opts.targets) || ['본문', 'next', '제목'];
+  const UI = 'data-pagenation-ui';
+  let current = targets[0];
+
+  const mk = (tag, css) => {
+    const e = document.createElement(tag);
+    e.setAttribute(UI, '');
+    Object.assign(e.style, css);
+    return e;
+  };
+
+  const box = mk('div', {position: 'fixed', pointerEvents: 'none', zIndex: '2147483647',
+    border: '2px solid #e11', background: 'rgba(238,17,17,.12)', display: 'none'});
+  const bar = mk('div', {position: 'fixed', zIndex: '2147483647',
+    maxWidth: '520px', padding: '8px 10px', font: '13px/1.5 sans-serif', color: '#111',
+    background: '#fff', border: '1px solid #888', borderRadius: '6px',
+    boxShadow: '0 2px 10px rgba(0,0,0,.25)'});
+  // 툴바가 고르려는 요소를 덮으면 클릭이 툴바로 간다. 기본은 아래쪽, 겹치면 사용자가 옮긴다.
+  let atTop = false;
+  const place = () => Object.assign(bar.style, atTop
+    ? {left: '12px', right: 'auto', top: '12px', bottom: 'auto'}
+    : {left: 'auto', right: '12px', top: 'auto', bottom: '12px'});
+  place();
+  const head = mk('div', {marginBottom: '4px'});
+  const list = mk('div', {});
+  bar.appendChild(head); bar.appendChild(list);
+  document.documentElement.appendChild(box);
+  document.documentElement.appendChild(bar);
+
+  const btn = (label, on, active) => {
+    const b = mk('button', {margin: '0 4px 0 0', padding: '2px 8px', cursor: 'pointer',
+      font: 'inherit', border: '1px solid #888', borderRadius: '4px',
+      background: active ? '#135' : '#eee', color: active ? '#fff' : '#111'});
+    b.textContent = label;
+    b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); on(); }, true);
+    return b;
+  };
+
+  const send = payload => { if (window.__pagenation_pick) window.__pagenation_pick(payload); };
+
+  const drawHead = () => {
+    head.textContent = '';
+    head.appendChild(document.createTextNode('고를 대상: '));
+    targets.forEach(t => head.appendChild(btn(t, () => { current = t; drawHead(); }, t === current)));
+    head.appendChild(btn('↕ 위치', () => { atTop = !atTop; place(); }, false));
+    head.appendChild(btn('완료', () => { if (window.__pagenation_done) window.__pagenation_done(); }, false));
+  };
+
+  const drawList = (cands, text) => {
+    list.textContent = '';
+    if (!cands.length) { list.textContent = '후보를 만들지 못했다.'; return; }
+    const t = mk('div', {color: '#555', marginBottom: '2px'});
+    t.textContent = text ? '"' + text.slice(0, 40) + '"' : '';
+    list.appendChild(t);
+    cands.forEach((c, i) => {
+      const mark = c.n === 1 ? ' \\u2713' : ' \\u26a0';
+      const row = btn(c.sel + ' \\u2014 ' + c.n + '개' + mark,
+        () => send({target: current, sel: c.sel, candidates: cands, text: text}), i === 0);
+      Object.assign(row.style, {display: 'block', width: '100%', textAlign: 'left', margin: '2px 0'});
+      list.appendChild(row);
+    });
+  };
+
+  document.addEventListener('mouseover', e => {
+    if (e.target.closest('[' + UI + ']')) return;
+    const r = e.target.getBoundingClientRect();
+    Object.assign(box.style, {display: 'block', left: r.left + 'px', top: r.top + 'px',
+      width: r.width + 'px', height: r.height + 'px'});
+  }, true);
+
+  document.addEventListener('click', e => {
+    if (e.target.closest('[' + UI + ']')) return;   // 툴바 자신의 클릭은 그대로 둔다
+    e.preventDefault(); e.stopPropagation();        // 링크 이동과 폼 전송을 막는다
+    const el = e.target;
+    const cands = window.__pagenationCandidates(el);
+    const text = (el.innerText || el.getAttribute('src') || '').trim();
+    drawList(cands, text);
+    send({target: current, sel: cands.length ? cands[0].sel : '', candidates: cands, text: text});
+  }, true);
+
+  drawHead();
+}"""
+
+
+def picker_setup_js(targets=("본문", "next", "제목")):
+    """후보 생성 함수와 선택기를 한 번에 세우는 스크립트. 둘을 따로 넣으면 클릭 핸들러가 조용히 죽는다."""
+    opts = json.dumps({"targets": list(targets)}, ensure_ascii=False)
+    return (f"(() => {{ window.__pagenationCandidates = {CANDIDATES_JS};"
+            f" ({PICKER_JS})({opts}); }})()")
+
+
+def install_picker(page, targets=("본문", "next", "제목")):
+    """이미 열려 있는 페이지에 선택기를 세운다."""
+    page.evaluate(f"() => {{ {picker_setup_js(targets)} }}")
+
+
+def pick(url, on_pick, timeout=15000, targets=("본문", "next", "제목"), on_log=None,
+         should_stop=None):
+    """브라우저를 띄우고 사용자가 클릭한 요소의 셀렉터 후보를 on_pick 으로 넘긴다."""
+    log = on_log or _stderr
+    done = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)   # 사람이 보고 고르는 기능이라 headful 고정
+        page = browser.new_page()
+        page.expose_function("__pagenation_pick", on_pick)
+        page.expose_function("__pagenation_done", lambda: done.append(True))
+        # 문서가 바뀔 때마다 다시 세운다. goto 후 한 번만 넣으면 리다이렉트·새로고침에서 선택기가 사라진다.
+        page.add_init_script(picker_setup_js(targets))
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+        install_picker(page, targets)          # add_init_script 가 늦게 걸리는 경우를 위한 보강
+        log("요소를 클릭하면 셀렉터 후보가 뜬다. 다 고르면 툴바의 '완료' 또는 [중지] 를 누른다.")
+        # 콜백은 페이지를 기다리는 동안에만 들어온다. 그냥 sleep 으로 막으면 클릭이 전달되지 않는다.
+        while not done and not (should_stop and should_stop()):
+            try:
+                page.wait_for_timeout(200)
+            except PWError:
+                break                                 # 사용자가 창을 직접 닫은 경우
+        browser.close()
 
 
 def probe(url, sel, next_sel, timeout=15000, headful=False, title_sel=None, delay=0,
