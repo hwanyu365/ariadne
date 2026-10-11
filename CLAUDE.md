@@ -130,8 +130,8 @@ python test_scrape.py
       - 종료 코드 0·1 이외거나 위 확인이 어긋나면 확인 실패다 → merge 하지 않고 소유자에게 알린다.
     - 앞섰으면 브랜치를 갱신해 CI `verify` 를 다시 통과시킨 뒤 merge 한다.
       - 갱신: `gh pr update-branch {PR번호}` → 원격 PR 브랜치만 바뀐다. `git pull --ff-only` 로 로컬을 맞춘 뒤 위 확인을 다시 한다.
-      - 새 head 에서 `verify` 가 통과했는지 본다 → `gh pr checks {PR번호}`
-      - 통과가 뜨지 않으면 merge 하지 않고 소유자에게 알린다. push 주체에 따라 워크플로가 트리거되지 않거나 승인 대기가 된다.
+      - 새 head 에서 `verify` 가 통과했는지 본다 → `gh pr checks {PR번호}` 의 `verify` 행만 읽는다. 필수가 아닌 체크의 실패는 판정에 넣지 않는다.
+      - `verify` 행이 없거나 pending·실패면 merge 하지 않고 소유자에게 알린다. push 주체에 따라 워크플로가 트리거되지 않거나 승인 대기가 된다.
       - CI `verify` 를 다시 통과시키는 것은 보호 규칙이 그것을 요구하기 때문이다 → 로컬 재실행으로 대체할 수 없다.
 
 ## 문서·주석
