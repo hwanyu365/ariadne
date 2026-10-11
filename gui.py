@@ -29,6 +29,23 @@ HINT = {
 }
 
 
+def parse_inputs(raw, probe):
+    """입력 문자열을 코어 인자로 바꾼다. 비면 사유를 ValueError 로 올려 로그에 띄운다."""
+    text = {k: raw[k].strip() for k, _ in TEXT_FIELDS}
+    if not text["url"]:
+        raise ValueError("URL 을 입력하라.")
+    if not probe and not (text["sel"] and text["next"]):
+        raise ValueError("수집 대상과 next 셀렉터가 필요하다. 모르면 probe 로 후보를 먼저 보라.")
+    nums = {}
+    for key, label, _ in NUM_FIELDS:
+        value = raw[key].strip() or "0"
+        try:
+            nums[key] = int(value)
+        except ValueError:
+            raise ValueError(f"{label} 은 숫자여야 한다: {value!r}") from None
+    return text, nums
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -113,20 +130,7 @@ class App:
         self.btn_stop.config(state="normal" if running else "disabled")
 
     def _args(self, probe):
-        """입력을 코어 인자로 바꾼다. 비면 사유를 ValueError 로 올려 로그에 띄운다."""
-        text = {k: self.vars[k].get().strip() for k, _ in TEXT_FIELDS}
-        if not text["url"]:
-            raise ValueError("URL 을 입력하라.")
-        if not probe and not (text["sel"] and text["next"]):
-            raise ValueError("수집 대상과 next 셀렉터가 필요하다. 모르면 probe 로 후보를 먼저 보라.")
-        nums = {}
-        for key, label, _ in NUM_FIELDS:
-            raw = self.vars[key].get().strip() or "0"
-            try:
-                nums[key] = int(raw)
-            except ValueError:
-                raise ValueError(f"{label} 은 숫자여야 한다: {raw!r}") from None
-        return text, nums
+        return parse_inputs({k: v.get() for k, v in self.vars.items()}, probe)
 
     def _start(self, probe):
         self.log.delete("1.0", "end")
