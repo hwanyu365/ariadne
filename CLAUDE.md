@@ -124,7 +124,11 @@ python test_scrape.py
     - 작성자가 직접 resolve 할 수 있어 설정의 강제력은 약하다 → 반영했거나 반영하지 않을 근거를 남긴 뒤에만 resolve 한다.
   - 브랜치가 최신 `main` 이 아니어도 merge 된다 → `main` 이 앞서간 뒤에는 CI 결과가 낡을 수 있다.
     - 자율 범위 `merge` 에서는 사람이 보지 않으므로, merge 전에 `main` 이 앞섰는지 확인한다.
-    - 앞섰으면 브랜치를 갱신해 `verify` 를 다시 통과시킨 뒤 merge 한다.
+      - 확인: `git fetch origin main` 후 `git merge-base --is-ancestor origin/main HEAD` → 종료 코드 0 이면 최신, 1 이면 `main` 이 앞섰다.
+    - 앞섰으면 브랜치를 갱신해 CI `verify` 를 다시 통과시킨 뒤 merge 한다.
+      - 갱신: `gh pr update-branch {PR번호}` → 새 base 로 CI 가 다시 돈다.
+      - 다시 통과시킬 대상은 CI `verify` 다 → 로컬 `python test_scrape.py` 재실행은 낡은 base 를 해소하지 못한다.
+      - "검증 명령은 하나" 와 어긋나지 않는다 → 로컬 통과는 CI 통과를 뜻하지만, 새 base 에서의 결과는 CI 에서만 얻는다.
 
 ## 문서·주석
 
