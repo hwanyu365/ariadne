@@ -164,11 +164,20 @@ def test_image_mode_max_pages():
 
 
 if __name__ == "__main__":
-    import test_gui
+    def collect(ns):
+        return {k: v for k, v in ns.items() if k.startswith("test_") and callable(v)}
 
-    found = dict(vars(test_gui))
-    found.update(globals())
-    tests = [v for k, v in sorted(found.items()) if k.startswith("test_") and callable(v)]
+    found = collect(globals())
+    try:
+        import test_gui
+    except ImportError as e:
+        print(f"  skip test_gui: {e}")
+    else:
+        gui_tests = collect(vars(test_gui))
+        dup = sorted(found.keys() & gui_tests.keys())
+        assert not dup, f"테스트 이름 중복: {dup}"
+        found.update(gui_tests)
+    tests = [v for _, v in sorted(found.items())]
     for t in tests:
         t()
         print(f"  ok {t.__name__}")
