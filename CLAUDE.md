@@ -1,4 +1,4 @@
-# pagenation
+# ariadne
 
 페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 데스크톱 도구
 
@@ -89,13 +89,13 @@ python test_scrape.py
 
 - 티켓: GitHub Issues. 표기 `GH-{번호}`
 - 브랜치: `{feat|bugfix|chore}/GH-{번호}`, 하위 이슈는 `{feat|bugfix|chore}/GH-{상위}-{하위}`
-- 워크트리: `../pagenation-GH-{번호}`
+- 워크트리: `../ariadne-GH-{번호}`
 - 커밋 메시지
 
   ```
   feat:[GH-12] 요약
 
-  [ISSUE] https://github.com/hwanyu365/pagenation/issues/12
+  [ISSUE] https://github.com/hwanyu365/ariadne/issues/12
   [DESC]
   [요구사항]
   - ...

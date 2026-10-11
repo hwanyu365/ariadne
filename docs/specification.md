@@ -1,8 +1,8 @@
-# pagenation 스펙
+# ariadne 스펙
 
 | 항목 | 값 |
 | --- | --- |
-| 문서명 | pagenation specification |
+| 문서명 | ariadne specification |
 | 작성자 | hwanyu365 |
 | 작성일 / 최종 수정일 | 2026-10-11 / 2026-10-11 |
 
