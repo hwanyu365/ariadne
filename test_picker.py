@@ -5,7 +5,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from scrape import CANDIDATES_JS, install_picker
+from scrape import CANDIDATES_JS, install_picker, picker_setup_js
 
 FIXTURE = """<meta charset="utf-8"><body style="margin:40px 300px 300px 40px">
 <h1 id="tt">제목</h1>
@@ -77,7 +77,7 @@ def test_picker_click_reports_and_blocks_navigation():
     """클릭하면 후보를 돌려주고 링크 이동은 막는다."""
     def run(page):
         got = []
-        page.expose_function("__pagenation_pick", lambda payload: got.append(payload))
+        page.expose_function("__ariadne_pick", lambda payload: got.append(payload))
         install_picker(page)
         before = page.url
         page.click(".next")
@@ -95,10 +95,10 @@ def test_picker_switches_target_from_toolbar():
     """툴바에서 대상을 바꾸면 그 뒤의 클릭이 바뀐 대상으로 전달된다."""
     def run(page):
         got = []
-        page.expose_function("__pagenation_pick", lambda payload: got.append(payload))
+        page.expose_function("__ariadne_pick", lambda payload: got.append(payload))
         install_picker(page)
         page.click("div.article.body")
-        page.evaluate("""() => [...document.querySelectorAll('[data-pagenation-ui] button')]
+        page.evaluate("""() => [...document.querySelectorAll('[data-ariadne-ui] button')]
             .find(b => b.textContent === 'next').click()""")
         page.click(".next")
         page.wait_for_timeout(200)
@@ -113,14 +113,36 @@ def test_picker_toolbar_click_is_not_treated_as_selection():
     """툴바 자신을 클릭한 것은 선택으로 세지 않는다."""
     def run(page):
         got = []
-        page.expose_function("__pagenation_pick", lambda payload: got.append(payload))
+        page.expose_function("__ariadne_pick", lambda payload: got.append(payload))
         install_picker(page)
-        page.evaluate("""() => [...document.querySelectorAll('[data-pagenation-ui] button')]
+        page.evaluate("""() => [...document.querySelectorAll('[data-ariadne-ui] button')]
             .find(b => b.textContent === '제목').click()""")
         page.wait_for_timeout(200)
         return got
 
     assert _on(run) == [], "툴바 버튼 클릭이 선택으로 전달됐다"
+
+
+def test_picker_installs_when_injected_before_document():
+    """문서가 생기기 전에 주입돼도 결국 설치된다. `pick()` 은 `add_init_script` 로 넣는다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "p.html"
+        f.write_text(FIXTURE, encoding="utf-8")
+        got, errs = [], []
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.on("pageerror", lambda e: errs.append(str(e)[:120]))
+            page.expose_function("__ariadne_pick", lambda payload: got.append(payload))
+            page.add_init_script(picker_setup_js())
+            page.goto(f.as_uri())
+            ui = page.evaluate("() => document.querySelectorAll('[data-ariadne-ui]').length")
+            page.click("div.article.body")
+            page.wait_for_timeout(200)
+            browser.close()
+    assert not errs, errs
+    assert ui > 0, "툴바와 하이라이트가 붙지 않았다"
+    assert got and got[0]["sel"] == "div.article.body", got
 
 
 if __name__ == "__main__":

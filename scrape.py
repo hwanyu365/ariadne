@@ -247,7 +247,7 @@ _IMAGE_CANDIDATES_JS = """() => {
 }"""
 
 
-# 아래 두 JS 는 `data-pagenation-ui` 를 공유한다. 선택기가 붙인 요소를 매치 수와 선택 대상에서 빼는 표식이다.
+# 아래 두 JS 는 `data-ariadne-ui` 를 공유한다. 선택기가 붙인 요소를 매치 수와 선택 대상에서 빼는 표식이다.
 # 클릭한 요소 하나에서 셀렉터 후보를 만든다. 매치 수를 함께 내어 상태 클래스가 섞였는지 드러낸다.
 CANDIDATES_JS = """el => {
   const esc = s => (window.CSS && CSS.escape) ? CSS.escape(s) : s;
@@ -277,19 +277,25 @@ CANDIDATES_JS = """el => {
   const count = s => {
     try {
       return Array.prototype.slice.call(document.querySelectorAll(s))
-        .filter(e => !e.closest('[data-pagenation-ui]')).length;
+        .filter(e => !e.closest('[data-ariadne-ui]')).length;
     } catch (_) { return 0; }
   };
   return out.map(sel => ({ sel: sel, n: count(sel) }));
 }"""
 
 # 하이라이트·툴바를 붙이고 클릭을 가로챈다. 페이지 동작을 바꾸지 않도록 전부 fixed 로 띄운다.
-PICKER_JS = """opts => {
-  if (window.__pagenationPicker) return;
-  window.__pagenationPicker = true;
+PICKER_JS = """function install(opts) {
   const targets = (opts && opts.targets) || ['본문', 'next', '제목'];
-  const UI = 'data-pagenation-ui';
+  const UI = 'data-ariadne-ui';
   let current = targets[0];
+
+  // add_init_script 는 문서가 생기기 전에 돈다 → 그때는 기다렸다가 붙인다.
+  // 가드는 설치가 끝난 뒤에 세운다. 앞에 두면 실패한 설치가 재설치를 막는다.
+  if (!document.documentElement) {
+    document.addEventListener('DOMContentLoaded', () => install(opts), {once: true});
+    return;
+  }
+  if (window.__ariadnePicker) return;
 
   const mk = (tag, css) => {
     const e = document.createElement(tag);
@@ -325,14 +331,14 @@ PICKER_JS = """opts => {
     return b;
   };
 
-  const send = payload => { if (window.__pagenation_pick) window.__pagenation_pick(payload); };
+  const send = payload => { if (window.__ariadne_pick) window.__ariadne_pick(payload); };
 
   const drawHead = () => {
     head.textContent = '';
     head.appendChild(document.createTextNode('고를 대상: '));
     targets.forEach(t => head.appendChild(btn(t, () => { current = t; drawHead(); }, t === current)));
     head.appendChild(btn('↕ 위치', () => { atTop = !atTop; place(); }, false));
-    head.appendChild(btn('완료', () => { if (window.__pagenation_done) window.__pagenation_done(); }, false));
+    head.appendChild(btn('완료', () => { if (window.__ariadne_done) window.__ariadne_done(); }, false));
   };
 
   const drawList = (cands, text) => {
@@ -361,20 +367,21 @@ PICKER_JS = """opts => {
     if (e.target.closest('[' + UI + ']')) return;   // 툴바 자신의 클릭은 그대로 둔다
     e.preventDefault(); e.stopPropagation();        // 링크 이동과 폼 전송을 막는다
     const el = e.target;
-    const cands = window.__pagenationCandidates(el);
+    const cands = window.__ariadneCandidates(el);
     const text = (el.innerText || el.getAttribute('src') || '').trim();
     drawList(cands, text);
     send({target: current, sel: cands.length ? cands[0].sel : '', candidates: cands, text: text});
   }, true);
 
   drawHead();
+  window.__ariadnePicker = true;
 }"""
 
 
 def picker_setup_js(targets=("본문", "next", "제목")):
     """후보 생성 함수와 선택기를 한 번에 세우는 스크립트. 둘을 따로 넣으면 클릭 핸들러가 조용히 죽는다."""
     opts = json.dumps({"targets": list(targets)}, ensure_ascii=False)
-    return (f"(() => {{ window.__pagenationCandidates = {CANDIDATES_JS};"
+    return (f"(() => {{ window.__ariadneCandidates = {CANDIDATES_JS};"
             f" ({PICKER_JS})({opts}); }})()")
 
 
@@ -391,8 +398,8 @@ def pick(url, on_pick, timeout=15000, targets=("본문", "next", "제목"), on_l
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)   # 사람이 보고 고르는 기능이라 headful 고정
         page = browser.new_page()
-        page.expose_function("__pagenation_pick", on_pick)
-        page.expose_function("__pagenation_done", lambda: done.append(True))
+        page.expose_function("__ariadne_pick", on_pick)
+        page.expose_function("__ariadne_done", lambda: done.append(True))
         # 문서가 바뀔 때마다 다시 세운다. goto 후 한 번만 넣으면 리다이렉트·새로고침에서 선택기가 사라진다.
         page.add_init_script(picker_setup_js(targets))
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
