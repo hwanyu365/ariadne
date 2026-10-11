@@ -224,7 +224,7 @@ def test_charset_ignored_by_browser_warns():
 
 def test_charset_alias_applied_not_warned():
     """브라우저가 다른 이름으로 정규화해 적용한 지정은 경고하지 않는다."""
-    for name in ("gb2312", "latin1"):
+    for name in ("gb2312", "latin1", "us-ascii"):
         _, _, logs = _run_undeclared(charset=name)
         assert not any("경고" in line for line in logs), (name, logs)
 

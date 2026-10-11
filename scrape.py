@@ -48,7 +48,7 @@ def charset_warning(page, charset=None):
         return None
     if not charset:
         return "  경고: 브라우저가 인코딩을 windows-1252 로 추정했다. 한글이 깨졌으면 인코딩을 utf-8 로 지정해 다시 받아라."
-    if codecs.lookup(charset).name in ("cp1252", "iso8859-1"):
+    if codecs.lookup(charset).name in ("cp1252", "iso8859-1", "ascii"):
         return None
     return f"  경고: 지정한 인코딩 {charset!r} 을 브라우저가 쓰지 않고 windows-1252 로 읽었다. utf-8 처럼 표준 이름으로 지정하라."
 
