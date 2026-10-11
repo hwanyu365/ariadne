@@ -75,7 +75,7 @@ class App:
         self.q = queue.Queue()
         self.stop = threading.Event()
         self.vars = {}
-        root.title("pagenation")
+        root.title("ariadne")
         root.columnconfigure(0, weight=1)
         root.rowconfigure(1, weight=1)
 
