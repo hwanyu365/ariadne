@@ -168,16 +168,21 @@ if __name__ == "__main__":
         return {k: v for k, v in ns.items() if k.startswith("test_") and callable(v)}
 
     found = collect(globals())
-    for name in ("test_gui", "test_picker"):
-        try:
-            mod = __import__(name)
-        except ImportError as e:
-            print(f"  skip {name}: {e}")
-            continue
+
+    def merge(mod):
         extra = collect(vars(mod))
         dup = sorted(found.keys() & extra.keys())
         assert not dup, f"테스트 이름 중복: {dup}"
         found.update(extra)
+
+    import test_picker          # 필수. skip 하면 이름이 바뀌거나 지워져도 통과한다
+    merge(test_picker)
+    try:
+        import test_gui         # tkinter 가 없는 환경을 위해 이것만 선택적이다
+    except ImportError as e:
+        print(f"  skip test_gui: {e}")
+    else:
+        merge(test_gui)
     tests = [v for _, v in sorted(found.items())]
     for t in tests:
         t()

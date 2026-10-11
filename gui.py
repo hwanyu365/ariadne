@@ -26,6 +26,26 @@ NUM_FIELDS = [
 # 선택기 툴바의 대상 이름을 입력란에 잇는다. 이미지 모드는 같은 칸에 이미지 셀렉터를 받는다.
 PICK_TARGETS = {"본문": "sel", "이미지": "sel", "next": "next", "제목": "title"}
 
+
+def pick_update(payload):
+    """선택기가 보낸 값을 (입력란 키, 셀렉터, 로그 줄) 로 바꾼다. 맞지 않으면 None.
+
+    `expose_function` 으로 연 창구라 대상 페이지의 스크립트도 호출할 수 있다 → 형태를 전부 확인한다.
+    """
+    if not isinstance(payload, dict):
+        return None
+    target = payload.get("target")
+    key = PICK_TARGETS.get(target) if isinstance(target, str) else None
+    sel = payload.get("sel")
+    if not key or not isinstance(sel, str) or not sel.strip():
+        return None
+    raw = payload.get("candidates")
+    cands = raw if isinstance(raw, list) else []
+    parts = [f"{c['sel']}({c['n']})" for c in cands
+             if isinstance(c, dict) and isinstance(c.get("sel"), str) and isinstance(c.get("n"), int)]
+    tail = f"   후보: {'  '.join(parts)}" if parts else ""
+    return key, sel.strip(), f"[{target}] {sel.strip()}{tail}"
+
 HINT = {
     "text": "본문이 들어 있는 컨테이너 (예: #articleBody)",
     "image": "이미지 요소까지 지정한다 (예: #articleBody img)",
@@ -127,7 +147,11 @@ class App:
                     self._write(msg)
         except queue.Empty:
             pass
-        self.root.after(100, self._drain)
+        except Exception as e:
+            self._write(f"로그 처리 실패: {type(e).__name__}: {e}")
+        finally:
+            # 여기서 끊기면 이후 로그가 영영 안 뜬다. 무슨 일이 있어도 다시 건다.
+            self.root.after(100, self._drain)
 
     def _set_running(self, running):
         state = "disabled" if running else "normal"
@@ -140,12 +164,12 @@ class App:
         return parse_inputs({k: v.get() for k, v in self.vars.items()}, probe)
 
     def _apply_pick(self, payload):
-        key = PICK_TARGETS.get(payload.get("target"))
-        if not key:
+        got = pick_update(payload)
+        if not got:
             return
-        self.vars[key].set(payload.get("sel", ""))
-        cands = "  ".join(f"{c['sel']}({c['n']})" for c in payload.get("candidates", ()))
-        self._write(f"[{payload['target']}] {payload.get('sel', '')}   후보: {cands}")
+        key, sel, line = got
+        self.vars[key].set(sel)
+        self._write(line)
 
     def _start_pick(self):
         self.log.delete("1.0", "end")

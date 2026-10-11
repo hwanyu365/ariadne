@@ -1,6 +1,7 @@
 """페이지네이션된 웹 페이지를 끝까지 넘기며 본문 텍스트나 이미지를 로컬 파일로 저장한다."""
 
 import argparse
+import json
 import mimetypes
 import sys
 import time
@@ -246,9 +247,7 @@ _IMAGE_CANDIDATES_JS = """() => {
 }"""
 
 
-# 선택기가 붙인 요소를 매치 수에서 빼기 위한 표식. 페이지 쪽 JS 와 문자열이 같아야 한다.
-PICKER_UI_ATTR = "data-pagenation-ui"
-
+# 아래 두 JS 는 `data-pagenation-ui` 를 공유한다. 선택기가 붙인 요소를 매치 수와 선택 대상에서 빼는 표식이다.
 # 클릭한 요소 하나에서 셀렉터 후보를 만든다. 매치 수를 함께 내어 상태 클래스가 섞였는지 드러낸다.
 CANDIDATES_JS = """el => {
   const esc = s => (window.CSS && CSS.escape) ? CSS.escape(s) : s;
@@ -372,11 +371,16 @@ PICKER_JS = """opts => {
 }"""
 
 
+def picker_setup_js(targets=("본문", "next", "제목")):
+    """후보 생성 함수와 선택기를 한 번에 세우는 스크립트. 둘을 따로 넣으면 클릭 핸들러가 조용히 죽는다."""
+    opts = json.dumps({"targets": list(targets)}, ensure_ascii=False)
+    return (f"(() => {{ window.__pagenationCandidates = {CANDIDATES_JS};"
+            f" ({PICKER_JS})({opts}); }})()")
+
+
 def install_picker(page, targets=("본문", "next", "제목")):
-    """후보 생성 함수와 선택기를 함께 주입한다. 둘을 따로 넣으면 클릭 핸들러가 조용히 죽는다."""
-    # 할당식을 그대로 주면 Playwright 가 그 함수를 호출해 버린다. 본문으로 감싸 할당만 시킨다.
-    page.evaluate(f"() => {{ window.__pagenationCandidates = {CANDIDATES_JS}; }}")
-    page.evaluate(PICKER_JS, {"targets": list(targets)})
+    """이미 열려 있는 페이지에 선택기를 세운다."""
+    page.evaluate(f"() => {{ {picker_setup_js(targets)} }}")
 
 
 def pick(url, on_pick, timeout=15000, targets=("본문", "next", "제목"), on_log=None,
@@ -389,8 +393,10 @@ def pick(url, on_pick, timeout=15000, targets=("본문", "next", "제목"), on_l
         page = browser.new_page()
         page.expose_function("__pagenation_pick", on_pick)
         page.expose_function("__pagenation_done", lambda: done.append(True))
+        # 문서가 바뀔 때마다 다시 세운다. goto 후 한 번만 넣으면 리다이렉트·새로고침에서 선택기가 사라진다.
+        page.add_init_script(picker_setup_js(targets))
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-        install_picker(page, targets)
+        install_picker(page, targets)          # add_init_script 가 늦게 걸리는 경우를 위한 보강
         log("요소를 클릭하면 셀렉터 후보가 뜬다. 다 고르면 툴바의 '완료' 또는 [중지] 를 누른다.")
         # 콜백은 페이지를 기다리는 동안에만 들어온다. 그냥 sleep 으로 막으면 클릭이 전달되지 않는다.
         while not done and not (should_stop and should_stop()):

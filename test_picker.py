@@ -60,15 +60,17 @@ def test_picker_suggests_container_for_image():
 
 
 def test_picker_excludes_own_ui_from_count():
-    """선택기가 붙인 요소는 매치 수에 들어가지 않는다."""
+    """선택기가 붙인 요소는 매치 수에 들어가지 않는다 → 태그만 쓴 후보에서 드러난다."""
     def run(page):
+        before = _candidates(page, "div.article.body")
         install_picker(page)
-        return _candidates(page, "div.article.body")
+        return before, _candidates(page, "div.article.body")
 
-    got = _on(run)
-    by_sel = {c["sel"]: c["n"] for c in got}
-    assert by_sel.get("div.article") == 3, got
-    assert all(c["n"] > 0 for c in got), got
+    before, after = _on(run)
+    n = lambda cs: {c["sel"]: c["n"] for c in cs}
+    assert n(before)["div"] == 4, before          # 픽스처의 div 수
+    assert n(after)["div"] == n(before)["div"], (before, after)
+    assert n(after)["div.article"] == 3, after
 
 
 def test_picker_click_reports_and_blocks_navigation():
