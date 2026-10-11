@@ -1,8 +1,11 @@
 """페이지네이션된 웹 페이지를 끝까지 넘기며 본문 텍스트나 이미지를 로컬 파일로 저장한다."""
 
 import argparse
+import base64
+import codecs
 import json
 import mimetypes
+import re
 import sys
 import time
 from pathlib import Path
@@ -20,6 +23,73 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp")
 
 def _stderr(msg):
     print(msg, file=sys.stderr)
+
+
+def check_charset(name):
+    """비었으면 None. 이름이 응답 헤더에 그대로 들어가므로 모르는 이름은 여기서 막는다."""
+    name = name.strip()
+    if not name:
+        return None
+    # codecs 는 이름의 공백·개행을 _ 로 정규화해 받아 준다 → 헤더에 넣기 전에 문자 집합부터 거른다.
+    if not re.fullmatch(r"[A-Za-z0-9._:-]+", name):
+        raise ValueError(f"알 수 없는 인코딩: {name!r} (예: utf-8, euc-kr)")
+    try:
+        "".encode(name)                     # 모르는 이름과 base64 같은 비텍스트 코덱을 함께 거부한다
+    except LookupError:
+        raise ValueError(f"알 수 없는 인코딩: {name!r} (예: utf-8, euc-kr)") from None
+    return name
+
+
+def charset_warning(page, charset=None):
+    """틀린 인코딩으로 읽어도 수집은 깨진 채 성공한다 → 조용히 지나가지 않게 로그 문구를 만든다."""
+    # 선언 없는 UTF-8 도, 브라우저가 모르는 이름으로 한 지정도 windows-1252 로 떨어진다.
+    # 지정 이름을 브라우저 결과와 비교하면 gb2312 → GBK 처럼 정상 적용된 별칭까지 경고하게 된다.
+    if page.evaluate("document.characterSet") != "windows-1252":
+        return None
+    if not charset:
+        return "  경고: 브라우저가 인코딩을 windows-1252 로 추정했다. 한글이 깨졌으면 인코딩을 utf-8 로 지정해 다시 받아라."
+    if codecs.lookup(charset).name in ("cp1252", "iso8859-1", "ascii"):
+        return None
+    return f"  경고: 지정한 인코딩 {charset!r} 을 브라우저가 쓰지 않고 windows-1252 로 읽었다. utf-8 처럼 표준 이름으로 지정하라."
+
+
+def new_page(browser, charset=None):
+    """charset 을 주면 문서 응답의 charset 을 바꿔 브라우저의 인코딩 추정을 건너뛴다."""
+    page = browser.new_page()
+    if not charset:
+        return page
+    # page.route 는 리다이렉트 체인의 첫 요청만 가로챈다 → 리다이렉트를 거친 문서가 빠진다.
+    # CDP Fetch 는 체인의 요청마다 응답 단계에서 멈춘다. 헤더만 바꾸는 continueResponse 는 디코딩에 반영되지 않아 본문째 넘긴다.
+    cdp = page.context.new_cdp_session(page)
+    # 인코딩이 다른 iframe 까지 덮으면 그쪽이 깨진다 → 메인 프레임 문서만 바꾼다.
+    main = cdp.send("Page.getFrameTree")["frameTree"]["frame"]["id"]
+
+    def paused(ev):
+        rid = ev["requestId"]
+        try:
+            if ev.get("frameId") == main and 200 <= (ev.get("responseStatusCode") or 0) < 300:
+                cdp.send("Fetch.fulfillRequest", forced(rid, ev))
+                return
+        except Exception:
+            pass                      # 멈춘 요청은 풀어 주지 않으면 타임아웃까지 매달린다 → 실패 종류와 무관하게 원래대로 보낸다
+        cdp.send("Fetch.continueRequest", {"requestId": rid})
+
+    def forced(rid, ev):
+        got = cdp.send("Fetch.getResponseBody", {"requestId": rid})
+        body = got["body"] if got["base64Encoded"] else base64.b64encode(got["body"].encode()).decode()
+        headers, mime = [], "text/html"
+        for h in ev.get("responseHeaders", []):
+            name = h["name"].lower()
+            if name == "content-type":
+                mime = h["value"].split(";")[0].strip() or mime
+            elif name not in ("content-encoding", "content-length"):   # 받은 본문은 이미 압축이 풀려 있다
+                headers.append(h)
+        headers.append({"name": "Content-Type", "value": f"{mime}; charset={charset}"})
+        return {"requestId": rid, "responseCode": ev["responseStatusCode"], "responseHeaders": headers, "body": body}
+
+    cdp.on("Fetch.requestPaused", paused)
+    cdp.send("Fetch.enable", {"patterns": [{"resourceType": "Document", "requestStage": "Response"}]})
+    return page
 
 
 def read_text(page, selector, timeout):
@@ -150,7 +220,7 @@ def save_text(page, text, prefix, num, digits, title_sel, log):
 
 
 def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False, delay=0,
-           digits=4, start=1, title_sel=None, mode="text", on_log=None, stop=None):
+           digits=4, start=1, title_sel=None, mode="text", on_log=None, stop=None, charset=None):
     log = on_log or _stderr
     images = mode == "image"
     read = read_srcs if images else read_text
@@ -159,11 +229,12 @@ def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False
     pages = 0
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headful)
-        page = browser.new_page()
+        page = new_page(browser, charset)
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
         if images:
             scroll_all(page)
         current = read(page, sel, timeout)
+        warned = images                  # 이미지는 인코딩과 무관하다
 
         while True:
             pages += 1
@@ -175,6 +246,12 @@ def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False
             else:
                 size, name = save_text(page, current, prefix, num, digits, title_sel, log)
                 log(f"[{pages}] {size}자 -> {name}")
+                if not warned:
+                    # 페이지마다 선언이 다를 수 있어 매번 보되, 같은 경고로 로그를 덮지 않게 한 번만 낸다.
+                    warn = charset_warning(page, charset)
+                    if warn:
+                        log(warn)
+                        warned = True
 
             if stop is not None and stop.is_set():
                 log("  중단: 사용자 중지.")
@@ -394,13 +471,13 @@ def install_picker(page, targets=("본문", "next", "제목")):
 
 
 def pick(url, on_pick, timeout=15000, targets=("본문", "next", "제목"), on_log=None,
-         should_stop=None):
+         should_stop=None, charset=None):
     """브라우저를 띄우고 사용자가 클릭한 요소의 셀렉터 후보를 on_pick 으로 넘긴다."""
     log = on_log or _stderr
     done = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)   # 사람이 보고 고르는 기능이라 headful 고정
-        page = browser.new_page()
+        page = new_page(browser, charset)
         page.expose_function("__ariadne_pick", on_pick)
         page.expose_function("__ariadne_done", lambda: done.append(True))
         # 문서가 바뀔 때마다 다시 세운다. goto 후 한 번만 넣으면 리다이렉트·새로고침에서 선택기가 사라진다.
@@ -418,14 +495,19 @@ def pick(url, on_pick, timeout=15000, targets=("본문", "next", "제목"), on_l
 
 
 def probe(url, sel, next_sel, timeout=15000, headful=False, title_sel=None, delay=0,
-          on_log=None, pause=input):
+          on_log=None, pause=input, charset=None):
     log = on_log or print
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headful)
-        page = browser.new_page()
+        page = new_page(browser, charset)
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
         page.wait_for_timeout(1500 + delay)  # 지연 렌더되는 본문을 놓치지 않도록. 더 느리면 --delay 로 늘린다.
         scroll_all(page)
+
+        log(f"인코딩: {page.evaluate('document.characterSet')}")
+        warn = charset_warning(page, charset)
+        if warn:
+            log(warn)
 
         for name, s in (("-t 수집 대상", sel), ("-n next", next_sel), ("-T 제목", title_sel)):
             if not s:
@@ -478,18 +560,23 @@ def main():
     ap.add_argument("--headful", action="store_true", help="브라우저 창을 띄운다")
     ap.add_argument("--digits", type=int, default=4, help="번호 자릿수 (기본 4 -> _0001)")
     ap.add_argument("--start", type=int, default=1, help="시작 번호 (기본 1)")
+    ap.add_argument("--charset", default="", help="페이지 인코딩을 강제한다 (예: utf-8). 비우면 브라우저 추정")
     ap.add_argument("--probe", action="store_true", help="저장하지 않고 셀렉터 매치 수와 후보만 출력")
     a = ap.parse_args()
 
     if not a.probe and (not a.sel or not a.next):
         ap.error("-t 와 -n 이 필요하다. 셀렉터를 모르면 --probe 로 먼저 찾아라.")
+    try:
+        charset = check_charset(a.charset)
+    except ValueError as e:
+        ap.error(str(e))
 
     try:
         if a.probe:
-            probe(a.url, a.sel, a.next, a.timeout, a.headful, a.title, a.delay)
+            probe(a.url, a.sel, a.next, a.timeout, a.headful, a.title, a.delay, charset=charset)
             return
         n = scrape(a.url, a.sel, a.next, a.prefix, a.max, a.timeout, a.headful, a.delay,
-                   a.digits, a.start, a.title, a.mode)
+                   a.digits, a.start, a.title, a.mode, charset=charset)
     except PWError as e:
         # 스택트레이스보다 "무엇을 확인하라"가 쓸모 있다. 대부분 셀렉터 오타 아니면 접속 실패다.
         print("실패:", str(e).splitlines()[0], file=sys.stderr)

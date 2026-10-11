@@ -2,12 +2,15 @@
 
 import contextlib
 import functools
+import gzip
 import http.server
 import tempfile
 import threading
 from pathlib import Path
 
-from scrape import scrape
+from playwright.sync_api import sync_playwright
+
+from scrape import check_charset, new_page, probe, scrape
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"fixture" * 4
 
@@ -58,10 +61,28 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+class _GzipHandler(_QuietHandler):
+    """실제 사이트처럼 gzip 으로 보낸다. 디렉터리 주소의 301 은 그대로 둔다."""
+
+    def do_GET(self):
+        path = Path(self.translate_path(self.path))
+        if path.is_dir() and not self.path.endswith("/"):
+            return super().do_GET()
+        if path.is_dir():
+            path = path / "index.html"
+        body = gzip.compress(path.read_bytes())
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Encoding", "gzip")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 @contextlib.contextmanager
-def _serve(directory: Path):
+def _serve(directory: Path, handler_cls=_QuietHandler):
     """이미지 다운로드는 실제 HTTP 응답으로 확인한다. file:// 로는 브라우저 request 가 본문을 받지 못한다."""
-    handler = functools.partial(_QuietHandler, directory=str(directory))
+    handler = functools.partial(handler_cls, directory=str(directory))
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
@@ -69,6 +90,28 @@ def _serve(directory: Path):
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def _write_undeclared_utf8(d: Path):
+    """charset 선언 없는 UTF-8 페이지. 디렉터리 주소로 열면 서버가 슬래시를 붙이는 301 을 먼저 돌려준다."""
+    ep = d / "ep"
+    ep.mkdir()
+    (ep / "index.html").write_bytes(
+        '<body><div id=c>본문 1 가나다</div><a class="next" href="p2.html">next</a></body>'.encode())
+    (ep / "p2.html").write_bytes(
+        '<body><div id=c>본문 2 가나다</div><a class="next" aria-disabled="true">next</a></body>'.encode())
+
+
+def _run_undeclared(handler_cls=_QuietHandler, **kw):
+    logs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        _write_undeclared_utf8(d)
+        with _serve(d, handler_cls) as base:
+            n = scrape(f"{base}/ep", "#c", ".next", str(d / "out" / "p"), timeout=5000,
+                       on_log=logs.append, **kw)
+        texts = [f.read_text(encoding="utf-8") for f in sorted((d / "out").glob("p_*.txt"))]
+        return n, texts, logs
 
 
 def _run(make, **kw):
@@ -156,6 +199,174 @@ def test_image_mode_reads_data_src():
     assert pages == 2, pages
     assert names == ["p_0001_001.png", "p_0001_002.png", "p_0002_001.png", "p_0002_002.png"], names
     assert all(b == PNG for b in blobs), [len(b) for b in blobs]
+
+
+def test_charset_undeclared_utf8_warns():
+    """선언 없는 UTF-8 은 깨진 채 받아진다 → 조용히 끝나지 않고 로그로 알린다."""
+    n, texts, logs = _run_undeclared()
+    assert n == 2, n
+    assert texts[0] != "본문 1 가나다", texts      # 픽스처가 실제로 추정을 틀리게 만드는지
+    assert any("windows-1252" in line for line in logs), logs
+
+
+def test_charset_warns_when_later_page_undeclared():
+    """첫 페이지가 정상이어도 이후 페이지에서 추정이 틀리면 알린다."""
+    logs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "a.html").write_bytes('<meta charset="utf-8"><div id=c>본문 1</div><a class="next" href="b.html">n</a>'.encode())
+        (d / "b.html").write_bytes('<div id=c>본문 2</div><a class="next" aria-disabled="true">n</a>'.encode())
+        with _serve(d) as base:
+            n = scrape(f"{base}/a.html", "#c", ".next", str(d / "out" / "p"), timeout=5000, on_log=logs.append)
+    assert n == 2, n
+    assert sum("windows-1252" in line for line in logs) == 1, logs
+
+
+def test_charset_forced_reads_undeclared_utf8():
+    """인코딩을 지정하면 리다이렉트와 링크 이동을 거쳐도 모든 페이지를 그 인코딩으로 읽는다."""
+    n, texts, logs = _run_undeclared(charset="utf-8")
+    assert n == 2, n
+    assert texts == ["본문 1 가나다", "본문 2 가나다"], texts
+    assert not any("windows-1252" in line for line in logs), logs
+
+
+def test_charset_ignored_by_browser_warns():
+    """파이썬은 알지만 브라우저는 모르는 이름이면 지정이 무시된다 → 조용히 추정으로 돌아가지 않고 알린다."""
+    _, texts, logs = _run_undeclared(charset="u8")
+    assert texts[0] != "본문 1 가나다", texts      # 브라우저가 실제로 지정을 무시하는지
+    assert any("u8" in line and "windows-1252" in line for line in logs), logs
+
+
+def test_charset_alias_applied_not_warned():
+    """브라우저가 다른 이름으로 정규화해 적용한 지정은 경고하지 않는다."""
+    for name in ("gb2312", "latin1", "us-ascii"):
+        _, _, logs = _run_undeclared(charset=name)
+        assert not any("경고" in line for line in logs), (name, logs)
+
+
+def test_charset_forced_overrides_wrong_declaration():
+    """EUC-KR 바이트를 utf-8 로 잘못 선언한 페이지도 지정한 인코딩으로 읽는다. 원본 바이트가 그대로 넘어가야 맞는다."""
+    def write(d):
+        (d / "w.html").write_bytes('<meta charset="utf-8"><body><div id=c>본문 가나다</div></body>'.encode("euc-kr"))
+    texts = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        write(d)
+        with _serve(d) as base:
+            for cs in (None, "euc-kr"):
+                scrape(f"{base}/w.html", "#c", ".next", str(d / str(cs) / "p"), timeout=5000,
+                       charset=cs, on_log=lambda _: None)
+                texts[cs] = (d / str(cs) / "p_0001.txt").read_text(encoding="utf-8")
+    assert texts[None] != "본문 가나다", texts      # 선언을 따르면 실제로 깨지는지
+    assert texts["euc-kr"] == "본문 가나다", texts
+
+
+def test_charset_forced_leaves_iframe_alone():
+    """지정은 메인 문서에만 건다. 인코딩이 다른 iframe 까지 덮으면 그쪽이 깨진다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "outer.html").write_bytes('<body><div id=c>본문 가나다</div><iframe src="inner.html"></iframe></body>'.encode())
+        (d / "inner.html").write_bytes('<meta charset="euc-kr"><body><div id=i>광고 가나다</div></body>'.encode("euc-kr"))
+        with _serve(d) as base, sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = new_page(browser, "utf-8")
+            page.goto(f"{base}/outer.html", wait_until="load")
+            outer = page.inner_text("#c")
+            inner = page.frames[1].inner_text("#i")
+            browser.close()
+    assert outer == "본문 가나다", outer
+    assert inner == "광고 가나다", inner
+
+
+def test_charset_failure_falls_back_to_original():
+    """가로챈 응답을 바꾸다 실패해도 요청을 풀어 원래 응답으로 로드한다. 매달리면 수집이 타임아웃으로 끝난다."""
+    from playwright.sync_api import BrowserContext
+
+    class Broken:
+        def __init__(self, real):
+            self.real = real
+
+        def on(self, event, handler):
+            self.real.on(event, handler)
+
+        def send(self, method, params=None):
+            if method == "Fetch.getResponseBody":
+                raise RuntimeError("고장")
+            return self.real.send(method, params)
+
+    orig = BrowserContext.new_cdp_session
+    BrowserContext.new_cdp_session = lambda self, page: Broken(orig(self, page))
+    try:
+        n, texts, _ = _run_undeclared(charset="utf-8")
+    finally:
+        BrowserContext.new_cdp_session = orig
+    assert n == 2, n
+    assert texts[0] != "본문 1 가나다", texts      # 지정이 빠진 원래 응답이다
+
+
+class _CookieHandler(_QuietHandler):
+    """첫 페이지가 쿠키 둘을 내리고, 다음 페이지는 받은 쿠키를 본문에 보여 준다."""
+
+    def do_GET(self):
+        if self.path.endswith("p2.html"):
+            body = f'<div id=c>{self.headers.get("Cookie")}</div><a class="next" aria-disabled="true">n</a>'
+        else:
+            body = '<div id=c>본문 1</div><a class="next" href="p2.html">n</a>'
+        data = body.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        if not self.path.endswith("p2.html"):
+            self.send_header("Set-Cookie", "a=1; Path=/")
+            self.send_header("Set-Cookie", "b=2; Path=/")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def test_charset_forced_keeps_cookies():
+    """지정해도 응답이 내린 쿠키가 모두 남아 다음 페이지 요청에 실린다. 세션 쿠키 사이트가 지정 때문에 막히면 안 된다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        with _serve(d, _CookieHandler) as base:
+            scrape(f"{base}/p1.html", "#c", ".next", str(d / "out" / "p"), timeout=5000,
+                   charset="utf-8", on_log=lambda _: None)
+        assert (d / "out" / "p_0002.txt").read_text(encoding="utf-8") == "a=1; b=2"
+
+
+def test_charset_forced_reads_gzip_response():
+    """압축된 응답도 지정한 인코딩으로 읽는다."""
+    n, texts, _ = _run_undeclared(_GzipHandler, charset="utf-8")
+    assert n == 2, n
+    assert texts == ["본문 1 가나다", "본문 2 가나다"], texts
+
+
+def test_probe_reports_charset():
+    """probe 는 추정 인코딩을 보여 주고, 지정하면 미리보기부터 바로 읽힌다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        _write_undeclared_utf8(d)
+        with _serve(d) as base:
+            guessed, forced = [], []
+            probe(f"{base}/ep", "#c", None, timeout=5000, on_log=guessed.append)
+            probe(f"{base}/ep", "#c", None, timeout=5000, on_log=forced.append, charset="utf-8")
+    assert any("인코딩: windows-1252" in line for line in guessed), guessed
+    assert any("경고" in line and "windows-1252" in line for line in guessed), guessed
+    assert any("인코딩: UTF-8" in line for line in forced), forced
+    assert any("본문 1 가나다" in line for line in forced), forced
+    assert not any("경고" in line for line in forced), forced
+
+
+def test_charset_name_checked():
+    assert check_charset("  ") is None
+    assert check_charset(" utf-8 ") == "utf-8"
+    assert check_charset("euc-kr") == "euc-kr"
+    for bad in ("nope", "utf-8\r\nx-evil: 1", "utf\r\n8", "utf 8", "base64"):
+        try:
+            check_charset(bad)
+        except ValueError as e:
+            assert "인코딩" in str(e), e
+        else:
+            raise AssertionError(bad)
 
 
 def test_image_mode_max_pages():
