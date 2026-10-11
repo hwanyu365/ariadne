@@ -304,6 +304,35 @@ def test_charset_failure_falls_back_to_original():
     assert texts[0] != "본문 1 가나다", texts      # 지정이 빠진 원래 응답이다
 
 
+class _CookieHandler(_QuietHandler):
+    """첫 페이지가 쿠키 둘을 내리고, 다음 페이지는 받은 쿠키를 본문에 보여 준다."""
+
+    def do_GET(self):
+        if self.path.endswith("p2.html"):
+            body = f'<div id=c>{self.headers.get("Cookie")}</div><a class="next" aria-disabled="true">n</a>'
+        else:
+            body = '<div id=c>본문 1</div><a class="next" href="p2.html">n</a>'
+        data = body.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        if not self.path.endswith("p2.html"):
+            self.send_header("Set-Cookie", "a=1; Path=/")
+            self.send_header("Set-Cookie", "b=2; Path=/")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def test_charset_forced_keeps_cookies():
+    """지정해도 응답이 내린 쿠키가 모두 남아 다음 페이지 요청에 실린다. 세션 쿠키 사이트가 지정 때문에 막히면 안 된다."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        with _serve(d, _CookieHandler) as base:
+            scrape(f"{base}/p1.html", "#c", ".next", str(d / "out" / "p"), timeout=5000,
+                   charset="utf-8", on_log=lambda _: None)
+        assert (d / "out" / "p_0002.txt").read_text(encoding="utf-8") == "a=1; b=2"
+
+
 def test_charset_forced_reads_gzip_response():
     """압축된 응답도 지정한 인코딩으로 읽는다."""
     n, texts, _ = _run_undeclared(_GzipHandler, charset="utf-8")
