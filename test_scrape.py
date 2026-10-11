@@ -222,6 +222,13 @@ def test_charset_ignored_by_browser_warns():
     assert any("u8" in line and "windows-1252" in line for line in logs), logs
 
 
+def test_charset_alias_applied_not_warned():
+    """브라우저가 다른 이름으로 정규화해 적용한 지정은 경고하지 않는다."""
+    for name in ("gb2312", "latin1"):
+        _, _, logs = _run_undeclared(charset=name)
+        assert not any("경고" in line for line in logs), (name, logs)
+
+
 def test_charset_forced_reads_gzip_response():
     """압축된 응답도 지정한 인코딩으로 읽는다."""
     n, texts, _ = _run_undeclared(_GzipHandler, charset="utf-8")

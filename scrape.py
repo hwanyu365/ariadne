@@ -36,25 +36,17 @@ def check_charset(name):
     return name
 
 
-def _same_charset(a, b):
-    try:
-        return codecs.lookup(a).name == codecs.lookup(b).name
-    except LookupError:
-        return False
-
-
 def charset_warning(page, charset=None):
     """틀린 인코딩으로 읽어도 수집은 깨진 채 성공한다 → 조용히 지나가지 않게 로그 문구를 만든다."""
-    actual = page.evaluate("document.characterSet")
-    if charset:
-        # 파이썬은 알지만 브라우저는 모르는 이름이면 지정이 무시되고 추정으로 돌아간다.
-        if not _same_charset(actual, charset):
-            return f"  경고: 지정한 인코딩 {charset!r} 을 브라우저가 쓰지 않고 {actual} 로 읽었다. utf-8 처럼 표준 이름으로 지정하라."
+    # 선언 없는 UTF-8 도, 브라우저가 모르는 이름으로 한 지정도 windows-1252 로 떨어진다.
+    # 지정 이름을 브라우저 결과와 비교하면 gb2312 → GBK 처럼 정상 적용된 별칭까지 경고하게 된다.
+    if page.evaluate("document.characterSet") != "windows-1252":
         return None
-    # 선언 없는 UTF-8 을 Chromium 은 windows-1252 로 읽는다.
-    if actual == "windows-1252":
+    if not charset:
         return "  경고: 브라우저가 인코딩을 windows-1252 로 추정했다. 한글이 깨졌으면 인코딩을 utf-8 로 지정해 다시 받아라."
-    return None
+    if codecs.lookup(charset).name in ("cp1252", "iso8859-1"):
+        return None
+    return f"  경고: 지정한 인코딩 {charset!r} 을 브라우저가 쓰지 않고 windows-1252 로 읽었다. utf-8 처럼 표준 이름으로 지정하라."
 
 
 def new_page(browser, charset=None):
