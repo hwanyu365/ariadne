@@ -237,11 +237,36 @@ def test_charset_ignored_by_browser_warns():
     assert any("u8" in line and "windows-1252" in line for line in logs), logs
 
 
+def _run_page(raw: bytes, **kw):
+    """한 페이지짜리 문서를 HTTP 로 받아 (본문, 로그) 를 돌려준다."""
+    logs = []
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "x.html").write_bytes(raw)
+        with _serve(d) as base:
+            scrape(f"{base}/x.html", "#c", ".next", str(d / "out" / "p"), timeout=5000, on_log=logs.append, **kw)
+        return (d / "out" / "p_0001.txt").read_text(encoding="utf-8"), logs
+
+
 def test_charset_alias_applied_not_warned():
     """브라우저가 다른 이름으로 정규화해 적용한 지정은 경고하지 않는다."""
-    for name in ("gb2312", "latin1", "us-ascii"):
-        _, _, logs = _run_undeclared(charset=name)
+    for name, text in (("gb2312", "中文 本文"), ("latin1", "café"), ("us-ascii", "plain")):
+        got, logs = _run_page(f"<div id=c>{text}</div>".encode(name), charset=name)
+        assert got == text, (name, got)
         assert not any("경고" in line for line in logs), (name, logs)
+
+
+def test_charset_warns_when_utf8_read_as_other():
+    """UTF-8 바이트를 다른 인코딩으로 읽으면 그 인코딩이 무엇이든 알린다. 창을 띄우면 기본 인코딩이 OS 로캘을 따라 바뀐다."""
+    raw = '<meta charset="euc-kr"><div id=c>érkezik 가나다</div>'.encode()
+    got, logs = _run_page(raw)
+    assert got != "érkezik 가나다", got          # 선언을 따라 실제로 깨지는지
+    assert any("경고" in line and "EUC-KR" in line for line in logs), logs
+    got, logs = _run_page(raw, charset="utf-8")
+    assert got == "érkezik 가나다", got
+    assert not any("경고" in line for line in logs), logs
+    _, logs = _run_page(raw, charset="euc-kr")    # 지정을 틀리게 한 경우
+    assert any("경고" in line and "euc-kr" in line for line in logs), logs
 
 
 def test_charset_forced_overrides_wrong_declaration():
@@ -269,7 +294,7 @@ def test_charset_forced_leaves_iframe_alone():
         (d / "inner.html").write_bytes('<meta charset="euc-kr"><body><div id=i>광고 가나다</div></body>'.encode("euc-kr"))
         with _serve(d) as base, sync_playwright() as p:
             browser = p.chromium.launch()
-            page = new_page(browser, "utf-8")
+            page, _ = new_page(browser, "utf-8")
             page.goto(f"{base}/outer.html", wait_until="load")
             outer = page.inner_text("#c")
             inner = page.frames[1].inner_text("#i")
