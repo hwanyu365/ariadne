@@ -2,7 +2,6 @@
 
 import argparse
 import base64
-import codecs
 import json
 import mimetypes
 import re
@@ -40,24 +39,40 @@ def check_charset(name):
     return name
 
 
-def charset_warning(page, charset=None):
+def charset_warning(page, body, charset=None):
     """틀린 인코딩으로 읽어도 수집은 깨진 채 성공한다 → 조용히 지나가지 않게 로그 문구를 만든다."""
-    # 선언 없는 UTF-8 도, 브라우저가 모르는 이름으로 한 지정도 windows-1252 로 떨어진다.
-    # 지정 이름을 브라우저 결과와 비교하면 gb2312 → GBK 처럼 정상 적용된 별칭까지 경고하게 된다.
-    if page.evaluate("document.characterSet") != "windows-1252":
+    # 브라우저가 고른 인코딩 이름으로는 판정할 수 없다. 선언이 없을 때 쓰는 기본값이 창 모드·OS 로캘에 따라 바뀐다.
+    # 비ASCII 를 담은 올바른 UTF-8 바이트가 다른 인코딩의 글이기는 어렵다 → 원래 바이트로 판정한다.
+    actual = page.evaluate("document.characterSet")
+    if actual == "UTF-8" or body.isascii():
         return None
-    if not charset:
-        return "  경고: 브라우저가 인코딩을 windows-1252 로 추정했다. 한글이 깨졌으면 인코딩을 utf-8 로 지정해 다시 받아라."
-    if codecs.lookup(charset).name in ("cp1252", "iso8859-1", "ascii"):
+    try:
+        body.decode("utf-8")
+    except UnicodeDecodeError:
         return None
-    return f"  경고: 지정한 인코딩 {charset!r} 을 브라우저가 쓰지 않고 windows-1252 로 읽었다. utf-8 처럼 표준 이름으로 지정하라."
+    if charset:
+        return f"  경고: 페이지는 utf-8 로 보이는데 지정한 인코딩 {charset!r} 로 받아 {actual} 로 읽었다. 인코딩을 utf-8 로 지정하라."
+    return f"  경고: 페이지는 utf-8 로 보이는데 브라우저가 {actual} 로 읽었다. 글자가 깨졌으면 인코딩을 utf-8 로 지정해 다시 받아라."
 
 
 def new_page(browser, charset=None):
-    """charset 을 주면 문서 응답의 charset 을 바꿔 브라우저의 인코딩 추정을 건너뛴다."""
+    """(페이지, 메인 문서의 원래 바이트를 돌려주는 함수). charset 을 주면 문서 응답의 charset 을 바꿔 브라우저의 인코딩 추정을 건너뛴다."""
     page = browser.new_page()
+    docs = []
+
+    def keep(read):
+        docs[:] = [read]              # 수백 페이지를 넘기는 동안 지난 문서를 쥐고 있지 않는다
+
+    def doc():
+        try:
+            return docs[-1]() if docs else b""
+        except PWError:
+            return b""                # 본문을 못 얻으면 판정하지 않는다. 경고는 부가 정보라 수집을 멈출 이유가 못 된다
+
     if not charset:
-        return page
+        page.on("response", lambda r: r.request.is_navigation_request() and r.frame == page.main_frame
+                and keep(r.body))
+        return page, doc
     # page.route 는 리다이렉트 체인의 첫 요청만 가로챈다 → 리다이렉트를 거친 문서가 빠진다.
     # CDP Fetch 는 체인의 요청마다 응답 단계에서 멈춘다. 헤더만 바꾸는 continueResponse 는 디코딩에 반영되지 않아 본문째 넘긴다.
     cdp = page.context.new_cdp_session(page)
@@ -77,6 +92,9 @@ def new_page(browser, charset=None):
     def forced(rid, ev):
         got = cdp.send("Fetch.getResponseBody", {"requestId": rid})
         body = got["body"] if got["base64Encoded"] else base64.b64encode(got["body"].encode()).decode()
+        # 바꿔 넘긴 응답의 response.body() 는 디코딩 뒤 다시 인코딩한 값이라 원래 바이트를 여기서 남긴다.
+        raw = base64.b64decode(body)
+        keep(lambda: raw)
         headers, mime = [], "text/html"
         for h in ev.get("responseHeaders", []):
             name = h["name"].lower()
@@ -89,7 +107,7 @@ def new_page(browser, charset=None):
 
     cdp.on("Fetch.requestPaused", paused)
     cdp.send("Fetch.enable", {"patterns": [{"resourceType": "Document", "requestStage": "Response"}]})
-    return page
+    return page, doc
 
 
 def read_text(page, selector, timeout):
@@ -229,7 +247,7 @@ def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False
     pages = 0
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headful)
-        page = new_page(browser, charset)
+        page, doc = new_page(browser, charset)
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
         if images:
             scroll_all(page)
@@ -248,7 +266,7 @@ def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False
                 log(f"[{pages}] {size}자 -> {name}")
                 if not warned:
                     # 페이지마다 선언이 다를 수 있어 매번 보되, 같은 경고로 로그를 덮지 않게 한 번만 낸다.
-                    warn = charset_warning(page, charset)
+                    warn = charset_warning(page, doc(), charset)
                     if warn:
                         log(warn)
                         warned = True
@@ -477,7 +495,7 @@ def pick(url, on_pick, timeout=15000, targets=("본문", "next", "제목"), on_l
     done = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)   # 사람이 보고 고르는 기능이라 headful 고정
-        page = new_page(browser, charset)
+        page, _ = new_page(browser, charset)
         page.expose_function("__ariadne_pick", on_pick)
         page.expose_function("__ariadne_done", lambda: done.append(True))
         # 문서가 바뀔 때마다 다시 세운다. goto 후 한 번만 넣으면 리다이렉트·새로고침에서 선택기가 사라진다.
@@ -499,13 +517,13 @@ def probe(url, sel, next_sel, timeout=15000, headful=False, title_sel=None, dela
     log = on_log or print
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headful)
-        page = new_page(browser, charset)
+        page, doc = new_page(browser, charset)
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
         page.wait_for_timeout(1500 + delay)  # 지연 렌더되는 본문을 놓치지 않도록. 더 느리면 --delay 로 늘린다.
         scroll_all(page)
 
         log(f"인코딩: {page.evaluate('document.characterSet')}")
-        warn = charset_warning(page, charset)
+        warn = charset_warning(page, doc(), charset)
         if warn:
             log(warn)
 
