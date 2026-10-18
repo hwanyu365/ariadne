@@ -4,13 +4,16 @@ import contextlib
 import functools
 import gzip
 import http.server
+import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
 
+from playwright.sync_api import Error as PWError
 from playwright.sync_api import sync_playwright
 
-from scrape import check_charset, new_page, probe, scrape
+from scrape import check_charset, launch, new_page, probe, scrape
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"fixture" * 4
 
@@ -398,6 +401,55 @@ def test_image_mode_max_pages():
     pages, names, _ = _run_images("src", max_pages=1)
     assert pages == 1 and names == ["p_0001_001.png", "p_0001_002.png"], (pages, names)
 
+
+
+class _FakeChromium:
+    """launch 호출을 기록하고, 정해 둔 채널에서 실패한다."""
+
+    def __init__(self, failing):
+        self.failing, self.calls = failing, []
+
+    def launch(self, headless, channel=None):
+        self.calls.append((headless, channel))
+        if channel in self.failing:
+            raise PWError(f"Executable doesn't exist ({channel})\n자세한 안내")
+        return f"browser:{channel}"
+
+
+class _FakePlaywright:
+    def __init__(self, failing):
+        self.chromium = _FakeChromium(failing)
+
+
+def test_import_without_console():
+    """창 모드 exe 는 콘솔이 없어 stdout·stderr 가 None 이다 → 가져오기만으로 죽으면 창이 뜨지 않는다."""
+    code = "import sys; sys.stdout = sys.stderr = None; import scrape, gui"
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=Path(__file__).parent)
+    assert r.returncode == 0, r.stderr
+
+
+def test_launch_prefers_playwright_chromium():
+    p = _FakePlaywright(failing=())
+    assert launch(p, headless=True) == "browser:None"
+    assert p.chromium.calls == [(True, None)]
+
+
+def test_launch_falls_back_to_edge():
+    p = _FakePlaywright(failing=(None,))
+    assert launch(p, headless=False) == "browser:msedge"
+    assert p.chromium.calls == [(False, None), (False, "msedge")]
+
+
+def test_launch_reports_both_failures():
+    p = _FakePlaywright(failing=(None, "msedge"))
+    try:
+        launch(p, headless=True)
+    except RuntimeError as e:
+        msg = str(e)
+    else:
+        raise AssertionError("둘 다 실패했는데 예외가 없다")
+    assert "Edge" in msg and "playwright install chromium" in msg, msg
+    assert "(None)" in msg and "(msedge)" in msg and "\n" not in msg, msg
 
 if __name__ == "__main__":
     def collect(ns):

@@ -146,8 +146,11 @@ class App:
         saved = load_settings(SETTINGS_PATH)
 
         root.title("ariadne")
-        root.geometry("800x900")
-        root.minsize(680, 700)
+        # geometry 는 DPI 배율이 곱해지는 논리 크기라, 화면 높이도 배율로 나눠 비교한다.
+        screen_h = int(root.winfo_screenheight() / ctk.ScalingTracker.get_window_scaling(root))
+        height = max(600, min(900, screen_h - 120))
+        root.geometry(f"800x{height}+80+20")
+        root.minsize(680, min(700, height))
         if sys.platform == "win32" and ICON.exists():
             root.iconbitmap(str(ICON))
         root.columnconfigure(0, weight=1)

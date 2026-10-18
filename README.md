@@ -8,18 +8,24 @@
 - 셀렉터를 모르면 `probe` 로 후보를 먼저 찾는다
 - URL 이 바뀌지 않는 SPA 도 수집 대상이 실제로 바뀌는지 보고 넘긴다
 
-## 설치
+## 설치 없이 쓰기 (Windows)
+
+1. [Releases](https://github.com/hwanyu365/ariadne/releases/latest) 에서 `ariadne.exe` 를 받는다
+2. 아무 폴더에 두고 실행한다. 설치·Python 이 필요 없다
+
+- 브라우저는 Windows 에 기본 탑재된 Microsoft Edge 를 쓴다 → Edge 를 지웠다면 다시 설치해야 한다
+- 코드 서명이 없어 처음 실행할 때 SmartScreen 경고가 뜬다 → `추가 정보` → `실행`
+- 입력값은 `%APPDATA%/ariadne/settings.json` 에 남는다. 지우려면 그 폴더를 지운다
+
+## 개발 환경에서 실행
 
 ```sh
 pip install -r requirements.txt
 python -m playwright install chromium
-```
-
-## 실행
-
-```sh
 python gui.py
 ```
+
+## 사용법
 
 | 입력 | 설명 |
 | --- | --- |
@@ -64,4 +70,11 @@ python scrape.py <URL> -m image -t '#articleBody img' -n '.next' -o out/img
 
 ```sh
 python test_scrape.py
+```
+
+exe 를 직접 만들려면 (Release 워크플로와 같은 명령):
+
+```sh
+pip install pyinstaller
+python -m PyInstaller --noconfirm --onefile --windowed --name ariadne --icon assets/ariadne.ico --add-data "assets/ariadne.ico;assets" --collect-data customtkinter gui.py
 ```

@@ -22,3 +22,18 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+
+  # Chromium 은 싣지 않는다 → 실행 환경의 Edge 로 뜬다.
+  exe:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt pyinstaller==6.22.3
+      - run: python -m PyInstaller --noconfirm --onefile --windowed --name ariadne --icon assets/ariadne.ico --add-data "assets/ariadne.ico;assets" --collect-data customtkinter gui.py
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" dist/ariadne.exe
