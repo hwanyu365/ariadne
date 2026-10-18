@@ -48,10 +48,10 @@ SDD + TDD: 이슈 → 스펙 갱신 → TC 작성(Red) → 구현(Green) → Ref
 ## 검증 (완료 선언 전 반드시 실행)
 
 ```sh
-python test_scrape.py
+npm run verify
 ```
 
-- CI(`.github/workflows/ci.yml`)도 같은 명령을 실행한다.
+- CI(`.github/workflows/ci.yml`)도 같은 명령을 실행한다. Linux 는 화면이 없어 `xvfb-run -a` 로 감싼다.
 - 완료 판정은 스펙 §3·§4·§6 항목별로 구현 위치와 TC 를 대조한다 (`docs/rules_spec.md` §2.2).
 - 변경이 닿는 경로(같은 입력을 읽는 곳, 같은 산출물을 만드는 곳)를 모두 세고, 고치지 않은 경로는 왜 영향이 없는지 말할 수 있어야 한다.
 

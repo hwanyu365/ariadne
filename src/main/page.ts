@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain, type IpcMainEvent, type WebFrameMain } from 'electron';
 import path from 'node:path';
+import { checkCharset } from './charset';
 import { pickerSetupJs } from './picker';
 
 export type Send = (method: string, params?: object) => Promise<any>;
@@ -32,6 +33,8 @@ export class Page {
 
   /** charset 을 주면 메인 문서 응답의 charset 을 바꿔 브라우저의 인코딩 추정을 건너뛴다. */
   static async open(opts: PageOptions = {}): Promise<Page> {
+    // 이름이 응답 헤더에 그대로 들어간다 → 어느 호출자를 거쳐 와도 여기서 한 번 더 거른다.
+    const charset = checkCharset(opts.charset ?? '');
     const win = new BrowserWindow({
       show: opts.show ?? !!opts.picker,
       width: 1280,
@@ -49,15 +52,20 @@ export class Page {
     });
     // 수집은 원래 탭만 읽는다 (docs/specification.md NFR#9).
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    // CDP 는 렌더러가 생긴 뒤에야 프레임 트리를 준다.
-    await win.loadURL('about:blank');
-    const dbg = win.webContents.debugger;
-    dbg.attach('1.3');
-    const raw: Send = (method, params) => dbg.sendCommand(method, params);
-    const page = new Page(win, opts.cdp ? opts.cdp(raw) : raw);
-    await page.interceptDocuments(opts.charset ?? null);
-    if (opts.picker) page.installPicker(opts.picker);
-    return page;
+    try {
+      // CDP 는 렌더러가 생긴 뒤에야 프레임 트리를 준다.
+      await win.loadURL('about:blank');
+      const dbg = win.webContents.debugger;
+      dbg.attach('1.3');
+      const raw: Send = (method, params) => dbg.sendCommand(method, params);
+      const page = new Page(win, opts.cdp ? opts.cdp(raw) : raw);
+      await page.interceptDocuments(charset);
+      if (opts.picker) page.installPicker(opts.picker);
+      return page;
+    } catch (e) {
+      win.destroy();                    // 호출자는 Page 를 받지 못해 닫을 수 없다
+      throw e;
+    }
   }
 
   /** 메인 프레임 문서의 원래 바이트를 남기고, charset 을 주면 그 값으로 바꿔 넘긴다. */
@@ -67,12 +75,14 @@ export class Page {
     const onMessage = async (_e: unknown, method: string, ev: any) => {
       if (method !== 'Fetch.requestPaused') return;
       const rid = ev.requestId;
+      // 이번 문서의 바이트를 못 얻으면 지난 문서로 판정하게 된다 → 먼저 비운다.
+      if (ev.frameId === main) this.raw = Buffer.alloc(0);
       try {
         if (ev.frameId === main && ev.responseStatusCode >= 200 && ev.responseStatusCode < 300) {
           const got = await this.send('Fetch.getResponseBody', { requestId: rid });
           // 바꿔 넘긴 응답은 다시 인코딩된 값이라 원래 바이트는 여기서만 얻는다.
           const raw = Buffer.from(got.body, got.base64Encoded ? 'base64' : 'utf8');
-          this.raw = raw;               // 수백 페이지를 넘기는 동안 지난 문서를 쥐고 있지 않는다
+          this.raw = raw;
           if (charset) {
             await this.send('Fetch.fulfillRequest', forced(ev, raw, charset));
             return;
@@ -132,14 +142,20 @@ export class Page {
     await withTimeout(ready, timeout, `${timeout}ms 안에 페이지를 열지 못했다: ${url}`).finally(off);
   }
 
-  eval<T = unknown>(code: string): Promise<T> {
-    return this.win.webContents.executeJavaScript(code);
+  /** 이동 중인 문서에 걸린 평가는 끝나지 않을 수 있다 → 상한을 넘기면 실패로 돌린다. */
+  eval<T = unknown>(code: string, ms = 30000): Promise<T> {
+    // webContents.executeJavaScript 는 load 가 끝날 때까지 미뤄진다 → 응답이 멈춘 이미지 하나가 모든 평가를 막는다.
+    const run = this.send('Runtime.evaluate', { expression: code, awaitPromise: true, returnByValue: true }).then(r => {
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+      return r.result.value as T;
+    });
+    return withTimeout(run, ms, `${ms}ms 안에 페이지 평가가 끝나지 않았다.`);
   }
 
   /** 페이지가 이동 중이면 평가가 끝나지 않거나 실패한다 → 정해진 시간 안의 결과만 쓴다. */
   async evalSoon<T>(code: string, ms = 1000): Promise<T | undefined> {
     try {
-      return await withTimeout(this.eval<T>(code), ms, 'eval timeout');
+      return await this.eval<T>(code, ms);
     } catch {
       return undefined;
     }
@@ -186,8 +202,13 @@ export class Page {
   }
 
   /** 페이지와 같은 세션으로 받는다 → 쿠키와 referer 가 실려 핫링크를 막는 사이트에서도 통한다. */
-  fetch(url: string): Promise<Response> {
-    return this.win.webContents.session.fetch(url, { headers: { Referer: this.url() } });
+  fetch(url: string, timeout: number, signal?: AbortSignal): Promise<Response> {
+    // 응답이 멈춘 이미지 한 장이 수집과 중지를 함께 막지 않게 한다.
+    const limit = AbortSignal.timeout(timeout);
+    return this.win.webContents.session.fetch(url, {
+      headers: { Referer: this.url() },
+      signal: signal ? AbortSignal.any([limit, signal]) : limit,
+    });
   }
 
   childFrames(): WebFrameMain[] {

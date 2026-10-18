@@ -42,8 +42,12 @@ const candidates = (page: Page, selector: string) =>
   page.eval<Cand[]>(`(${CANDIDATES_JS})(document.querySelector(${JSON.stringify(selector)}))`);
 const bySel = (cs: Cand[]) => Object.fromEntries(cs.map(c => [c.sel, c.n]));
 const uiCount = `document.querySelectorAll('[data-ariadne-ui]').length`;
-const clickToolbar = (page: Page, label: string) =>
-  page.eval(`[...document.querySelectorAll('[data-ariadne-ui] button')].find(b => b.textContent === ${JSON.stringify(label)}).click()`);
+/** 선택기는 사람이 누른 클릭만 받는다 → 툴바도 신뢰된 마우스 이벤트로 누른다. */
+async function clickToolbar(page: Page, label: string) {
+  await page.eval(`[...document.querySelectorAll('[data-ariadne-ui] button')].find(b => b.textContent === ${JSON.stringify(label)}).setAttribute('data-test-target', '')`);
+  await page.click('[data-test-target]');
+  await page.eval(`document.querySelector('[data-test-target]')?.removeAttribute('data-test-target')`);
+}
 
 async function waitUi(page: Page) {
   for (let i = 0; i < 50 && !(await page.eval<number>(uiCount)); i++) await sleep(50);
@@ -155,4 +159,42 @@ test('pickerChannelHiddenFromPageScripts', async () => {
     return page.eval<string>(`typeof window.__ariadne_pick + ',' + typeof window.__ariadneCandidates`);
   }, true);
   assert.equal(seen, 'undefined,undefined');
+});
+
+test('pickerIgnoresSyntheticClicks', async () => {
+  // 대상 페이지가 합성한 클릭은 선택·완료로 세지 않는다. 핸들러는 격리 world 에 있어도 DOM 이벤트는 페이지가 만들 수 있다.
+  let done = false;
+  const got: unknown[] = [];
+  const page = await Page.open({ picker: { targets: ['본문', 'next', '제목'], onPick: p => got.push(p), onDone: () => { done = true; } } });
+  try {
+    await page.goto(fixture().url, 5000);
+    await waitUi(page);
+    await page.eval(`document.querySelector('div.article.body').click();
+      [...document.querySelectorAll('[data-ariadne-ui] button')].find(b => b.textContent === '완료').click()`);
+    await sleep(300);
+  } finally {
+    page.close();
+  }
+  assert.deepEqual(got, []);
+  assert.equal(done, false);
+});
+
+test('pickerIgnoresOtherWindowsPicks', async () => {
+  // 선택 통로는 앱 전역이다 → 한 선택기 창의 클릭이 다른 선택기의 콜백으로 가지 않는다.
+  const got = { a: [] as unknown[], b: [] as unknown[] };
+  const open = (key: 'a' | 'b') => Page.open({ picker: { targets: ['본문'], onPick: p => got[key].push(p), onDone: () => {} } });
+  const [a, b] = [await open('a'), await open('b')];
+  try {
+    const { url } = fixture();
+    await a.goto(url, 5000);
+    await b.goto(url, 5000);
+    await waitUi(b);
+    await b.click('div.article.body');
+    await sleep(300);
+  } finally {
+    a.close();
+    b.close();
+  }
+  assert.equal(got.b.length, 1);
+  assert.deepEqual(got.a, []);
 });

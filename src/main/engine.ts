@@ -55,7 +55,7 @@ function scrollAll(page: Page, step = 800, pause = 120) {
       await new Promise(r => setTimeout(r, ${pause}));
     }
     window.scrollTo(0, 0);
-  })()`);
+  })()`, 120000);                       // 아주 긴 페이지는 평가 기본 상한보다 오래 걸린다
 }
 
 /** 제목 셀렉터가 안 걸려도 빈 문자열을 돌려준다. 헤더는 부가 정보라 본문 수집을 멈출 이유가 못 된다. */
@@ -107,12 +107,12 @@ function imageExt(url: string, contentType: string | null): string {
 }
 
 /** 한 페이지의 이미지를 받아 저장하고 저장한 장수를 돌려준다. */
-async function saveImages(page: Page, srcs: string[], prefix: string, num: number, digits: number, log: Log) {
+async function saveImages(page: Page, srcs: string[], prefix: string, num: number, digits: number, log: Log, timeout: number, signal?: AbortSignal) {
   let saved = 0;
   for (const [i, src] of srcs.entries()) {
     const url = new URL(src, page.url()).href;
     try {
-      const resp = await page.fetch(url);
+      const resp = await page.fetch(url, timeout, signal);
       if (!resp.ok) {
         log(`  건너뜀 HTTP ${resp.status} ${url.slice(0, 80)}`);
         continue;
@@ -161,7 +161,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
       const num = start + pages - 1;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
-        const n = await saveImages(page, current.split('\n'), base, num, digits, log);
+        const n = await saveImages(page, current.split('\n'), base, num, digits, log, timeout, o.signal);
         log(`[${pages}] 이미지 ${n}장 -> ${path.basename(base)}_${pad(num, digits)}_*`);
       } else {
         const { size, name } = await saveText(page, current, base, num, digits, titleSel, log);

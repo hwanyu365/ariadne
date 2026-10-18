@@ -6,7 +6,8 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc",
-    "test": "tsc && electron dist/test-runner.js"
+    "test": "tsc && electron dist/test-runner.js",
+    "verify": "python test_scrape.py && npm test"
   },
   "devDependencies": {
     "@types/node": "24.19.0",

@@ -4,6 +4,7 @@ import type http from 'node:http';
 import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { BrowserWindow } from 'electron';
 import { type Handler, serve, staticFile, tempDir } from '../test/serve';
 import { probe, scrape, type ScrapeOptions } from './engine';
 import { Page } from './page';
@@ -375,4 +376,85 @@ test('probeListsCandidatesAndIframes', async () => {
   assert.match(all, /\[next 버튼 후보\][\s\S]*a\.next/);
   assert.match(all, /\[본문 후보[\s\S]*#c/);
   assert.match(all, /주의: iframe 1개/);
+});
+
+test('newWindowsAreDenied', async () => {
+  // 수집은 원래 탭만 읽는다 → target=_blank 링크와 window.open 이 창을 만들지 않는다.
+  const d = tempDir();
+  write(path.join(d, 'w.html'), `<meta charset="utf-8"><body><div id=c>본문</div>
+<a id=blank target="_blank" href="w.html">새 탭</a><script>setTimeout(() => window.open('w.html'), 100)</script></body>`);
+  const page = await Page.open();
+  const before = BrowserWindow.getAllWindows().length;
+  try {
+    await page.goto(pathToFileURL(path.join(d, 'w.html')).href, 5000);
+    await page.click('#blank');
+    await new Promise(r => setTimeout(r, 400));
+    assert.equal(BrowserWindow.getAllWindows().length, before);
+  } finally {
+    page.close();
+  }
+});
+
+test('charsetNameCheckedAtEngineEntry', async () => {
+  // 호출자가 검증을 빠뜨려도 응답 헤더에 모르는 이름이 들어가지 않는다.
+  const d = tempDir();
+  for (const bad of ['u8', 'utf-8\r\nx-evil: 1'])
+    await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { charset: bad, ...quiet }), /인코딩/, bad);
+});
+
+test('imageModeSkipsStalledImage', async () => {
+  // 응답이 멈춘 이미지 한 장 때문에 수집이 멈추지 않는다 → 건너뛰고 나머지와 다음 페이지를 받는다.
+  const d = tempDir();
+  writeImagePages(d, 2, 'src');
+  const files = staticFile();
+  const stall: Handler = (req, res, dir) => { if (!(req.url ?? '').endsWith('b1.png')) files(req, res, dir); };
+  const logs: string[] = [];
+  const srv = await serve(d, stall);
+  try {
+    const pages = await scrape(`${srv.base}/i1.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 1500, mode: 'image', onLog: m => logs.push(m) });
+    assert.equal(pages, 2);
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png', 'p_0002_001.png', 'p_0002_002.png']);
+  assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('b1.png')), logs.join('\n'));
+});
+
+test('charsetNotJudgedFromPreviousDocument', async () => {
+  // 오류 응답처럼 바이트를 남기지 않는 문서에서 지난 문서의 바이트로 판정하지 않는다.
+  const errorPage: Handler = (req, res) => {
+    if ((req.url ?? '').endsWith('a.html')) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(Buffer.from('<meta charset="utf-8"><div id=c>본문 1 가나다</div><a class="next" href="b.html">n</a>'));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/html' });
+      res.end('<div id=c>not found</div><a class="next" aria-disabled="true">n</a>');
+    }
+  };
+  const d = tempDir();
+  const logs: string[] = [];
+  const srv = await serve(d, errorPage);
+  try {
+    const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 5000, onLog: m => logs.push(m) });
+    assert.equal(n, 2);
+  } finally {
+    await srv.close();
+  }
+  assert.ok(!logs.some(l => l.includes('경고')), logs.join('\n'));
+});
+
+test('charsetForcedAcrossSites', async () => {
+  // 다른 사이트로 넘어가면 렌더러 프로세스가 바뀐다 → 그 뒤 문서에도 지정이 적용된다.
+  const d = tempDir();
+  writeUndeclaredUtf8(d);
+  const target = await serve(d);
+  const hop = await serve(d, (_req, res) => { res.writeHead(302, { Location: target.base.replace('127.0.0.1', 'localhost') + '/ep/' }); res.end(); });
+  try {
+    const n = await scrape(`${hop.base}/go`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 5000, charset: 'utf-8', ...quiet });
+    assert.equal(n, 2);
+  } finally {
+    await hop.close();
+    await target.close();
+  }
+  assert.deepEqual(outFiles(d).map(f => read(d, f)), ['본문 1 가나다', '본문 2 가나다']);
 });

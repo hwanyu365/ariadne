@@ -118,7 +118,7 @@ export const PICKER_JS = `function install(opts) {
       font: 'inherit', border: '1px solid #888', borderRadius: '4px',
       background: active ? '#135' : '#eee', color: active ? '#fff' : '#111'});
     b.textContent = label;
-    b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); on(); }, true);
+    b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); if (e.isTrusted) on(); }, true);
     return b;
   };
 
@@ -155,6 +155,8 @@ export const PICKER_JS = `function install(opts) {
   }, true);
 
   document.addEventListener('click', e => {
+    // 핸들러는 격리 world 에 있어도 DOM 이벤트는 페이지가 합성할 수 있다 → 사람이 누른 것만 선택으로 센다.
+    if (!e.isTrusted) return;
     if (e.target.closest('[' + UI + ']')) return;   // 툴바 자신의 클릭은 그대로 둔다
     e.preventDefault(); e.stopPropagation();        // 링크 이동과 폼 전송을 막는다
     const el = e.target;
