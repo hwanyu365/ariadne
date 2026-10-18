@@ -21,7 +21,11 @@ app.whenReady().then(() => {
   stream.on('test:complete', d => {
     if (d.nesting !== 0) return;
     completed++;
-    if (!d.details.passed) failed++;
+    if (!d.details.passed) {
+      failed++;
+      // 요약을 기다리지 않고 끝내므로 실패 사유는 여기서 바로 남긴다.
+      console.error(`\n✖ ${d.name}\n${d.details.error?.cause ?? d.details.error}`);
+    }
     if (completed === queued) idle = setTimeout(finish, 500);
   });
   stream.compose(spec).pipe(process.stdout);
