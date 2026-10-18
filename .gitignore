@@ -18,3 +18,7 @@ __pycache__/
 
 # 수집 산출물
 out/
+
+# Node
+node_modules/
+dist/

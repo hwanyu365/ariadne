@@ -30,3 +30,11 @@ jobs:
       # 비밀값 없이 실행한다 → fork PR 에서도 같은 결과여야 한다.
       - run: |
           python test_scrape.py
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스가 뜨지 않는다.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: xvfb-run -a npm test
