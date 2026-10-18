@@ -25,13 +25,16 @@ def _stderr(msg):
     print(msg, file=sys.stderr)
 
 
-def launch(p, headless):
+def launch(p, headless, log):
     """Playwright 용 Chromium 이 없으면 시스템 Edge 로 띄운다. 배포용 exe 는 Chromium 을 싣지 않는다."""
     try:
         return p.chromium.launch(headless=headless)
     except PWError as first:
         try:
-            return p.chromium.launch(headless=headless, channel="msedge")
+            browser = p.chromium.launch(headless=headless, channel="msedge")
+            # 브라우저마다 기본 인코딩이 달라 같은 페이지의 인코딩 경고가 달라질 수 있다 → 무엇으로 띄웠는지 남긴다.
+            log("브라우저: Playwright Chromium 을 띄우지 못해 Microsoft Edge 로 띄웠다.")
+            return browser
         except PWError as e:
             raise RuntimeError(
                 "브라우저를 띄우지 못했다. Microsoft Edge 를 설치하거나 `playwright install chromium` 을 실행하라."
@@ -260,7 +263,7 @@ def scrape(url, sel, next_sel, prefix, max_pages=0, timeout=15000, headful=False
     prefix.parent.mkdir(parents=True, exist_ok=True)
     pages = 0
     with sync_playwright() as p:
-        browser = launch(p, headless=not headful)
+        browser = launch(p, not headful, log)
         page, doc = new_page(browser, charset)
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
         if images:
@@ -508,7 +511,7 @@ def pick(url, on_pick, timeout=15000, targets=("본문", "next", "제목"), on_l
     log = on_log or _stderr
     done = []
     with sync_playwright() as p:
-        browser = launch(p, headless=False)   # 사람이 보고 고르는 기능이라 headful 고정
+        browser = launch(p, False, log)   # 사람이 보고 고르는 기능이라 headful 고정
         page, _ = new_page(browser, charset)
         page.expose_function("__ariadne_pick", on_pick)
         page.expose_function("__ariadne_done", lambda: done.append(True))
@@ -530,7 +533,7 @@ def probe(url, sel, next_sel, timeout=15000, headful=False, title_sel=None, dela
           on_log=None, pause=input, charset=None):
     log = on_log or print
     with sync_playwright() as p:
-        browser = launch(p, headless=not headful)
+        browser = launch(p, not headful, log)
         page, doc = new_page(browser, charset)
         page.goto(url, wait_until="domcontentloaded", timeout=timeout)
         page.wait_for_timeout(1500 + delay)  # 지연 렌더되는 본문을 놓치지 않도록. 더 느리면 --delay 로 늘린다.

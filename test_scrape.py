@@ -402,7 +402,6 @@ def test_image_mode_max_pages():
     assert pages == 1 and names == ["p_0001_001.png", "p_0001_002.png"], (pages, names)
 
 
-
 class _FakeChromium:
     """launch 호출을 기록하고, 정해 둔 채널에서 실패한다."""
 
@@ -429,27 +428,31 @@ def test_import_without_console():
 
 
 def test_launch_prefers_playwright_chromium():
-    p = _FakePlaywright(failing=())
-    assert launch(p, headless=True) == "browser:None"
+    p, logs = _FakePlaywright(failing=()), []
+    assert launch(p, True, logs.append) == "browser:None"
     assert p.chromium.calls == [(True, None)]
+    assert logs == [], logs
 
 
 def test_launch_falls_back_to_edge():
-    p = _FakePlaywright(failing=(None,))
-    assert launch(p, headless=False) == "browser:msedge"
+    """Edge 로 띄웠으면 로그에 남긴다. 브라우저마다 기본 인코딩이 달라 경고 내용이 바뀔 수 있다."""
+    p, logs = _FakePlaywright(failing=(None,)), []
+    assert launch(p, False, logs.append) == "browser:msedge"
     assert p.chromium.calls == [(False, None), (False, "msedge")]
+    assert len(logs) == 1 and "Edge" in logs[0], logs
 
 
 def test_launch_reports_both_failures():
     p = _FakePlaywright(failing=(None, "msedge"))
     try:
-        launch(p, headless=True)
+        launch(p, True, lambda _: None)
     except RuntimeError as e:
         msg = str(e)
     else:
         raise AssertionError("둘 다 실패했는데 예외가 없다")
     assert "Edge" in msg and "playwright install chromium" in msg, msg
     assert "(None)" in msg and "(msedge)" in msg and "\n" not in msg, msg
+
 
 if __name__ == "__main__":
     def collect(ns):

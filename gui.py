@@ -126,6 +126,11 @@ def log_level(line):
     return None
 
 
+def window_height(screen_h):
+    """작업 표시줄·제목 표시줄 몫을 남기고 화면 안에 들어오는 창 높이. 화면이 작으면 레이아웃보다 화면을 우선한다."""
+    return int(min(900, screen_h - 120))
+
+
 MODES = {"텍스트": "text", "이미지": "image"}
 DEFAULT_PREFIX = str(Path.home() / "Downloads" / "ariadne" / "page")
 ICON = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "assets" / "ariadne.ico"
@@ -147,8 +152,7 @@ class App:
 
         root.title("ariadne")
         # geometry 는 DPI 배율이 곱해지는 논리 크기라, 화면 높이도 배율로 나눠 비교한다.
-        screen_h = int(root.winfo_screenheight() / ctk.ScalingTracker.get_window_scaling(root))
-        height = max(600, min(900, screen_h - 120))
+        height = window_height(root.winfo_screenheight() / ctk.ScalingTracker.get_window_scaling(root))
         root.geometry(f"800x{height}+80+20")
         root.minsize(680, min(700, height))
         if sys.platform == "win32" and ICON.exists():

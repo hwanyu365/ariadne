@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from gui import NUM_FIELDS, load_settings, log_level, parse_inputs, pick_update, progress, save_settings
+from gui import NUM_FIELDS, load_settings, log_level, parse_inputs, pick_update, progress, save_settings, window_height
 
 
 def _raw(**over):
@@ -110,3 +110,9 @@ def test_gui_log_level():
     assert log_level("\n주의: iframe 2개.") == "warn"
     assert log_level("  건너뜀 HTTP 404 http://x/a.png") == "warn"
     assert log_level("[1] 10자 -> page_0001.txt") is None
+
+
+def test_gui_window_fits_screen():
+    assert window_height(1080) == 900
+    for screen in (720, 600, 1000.5):
+        assert window_height(screen) <= screen - 120, screen
