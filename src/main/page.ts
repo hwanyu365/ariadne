@@ -52,6 +52,11 @@ export class Page {
     });
     // 수집은 원래 탭만 읽는다 (docs/specification.md NFR#9).
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    // 수집에 권한·다운로드는 필요 없다 → 원격 페이지가 알림·위치·미디어를 얻거나 파일을 내려받지 못하게 한다.
+    const ses = win.webContents.session;
+    ses.setPermissionRequestHandler((_wc, _perm, grant) => grant(false));
+    ses.setPermissionCheckHandler(() => false);
+    ses.on('will-download', e => e.preventDefault());
     try {
       // CDP 는 렌더러가 생긴 뒤에야 프레임 트리를 준다.
       await win.loadURL('about:blank');

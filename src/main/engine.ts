@@ -75,6 +75,11 @@ async function waitChange(page: Page, selector: string, old: string, timeout: nu
   return null;
 }
 
+/** 주소는 원격 페이지가 정한다 → 웹 주소이거나 지금 페이지와 같은 스킴일 때만 따라간다. 원격 페이지가 로컬 파일을 가리키게 하지 않는다. */
+function reachable(url: URL, pageUrl: string): boolean {
+  return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === new URL(pageUrl).protocol;
+}
+
 /** 다음 페이지로 넘긴다. 성공하면 null, 못 넘기면 사유 문자열. */
 async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<string | null> {
   const state = await page.eval<{ clickable: boolean; href: string } | null>(`(() => {
@@ -94,7 +99,9 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
   // 숨김·비활성이어도 href 가 살아 있으면 직접 이동한다.
   // 마지막이 아닌 페이지에서도 next 를 CSS 로만 죽여두는 사이트가 있어서, 여기서 포기하면 1페이지만 받고 끝난다.
   if (state.href && !state.href.startsWith('#') && !state.href.startsWith('javascript:')) {
-    await page.goto(new URL(state.href, page.url()).href, timeout);
+    const to = new URL(state.href, page.url());
+    if (!reachable(to, page.url())) return `next 의 주소 ${to.href.slice(0, 80)} 는 따라가지 않는다.`;
+    await page.goto(to.href, timeout);
     return null;
   }
   return 'next 요소는 있으나 숨김/비활성이고 href 도 없다. 마지막 페이지로 본다.';
@@ -110,7 +117,12 @@ function imageExt(url: string, contentType: string | null): string {
 async function saveImages(page: Page, srcs: string[], prefix: string, num: number, digits: number, log: Log, timeout: number, signal?: AbortSignal) {
   let saved = 0;
   for (const [i, src] of srcs.entries()) {
-    const url = new URL(src, page.url()).href;
+    const parsed = URL.parse(src, page.url());
+    if (!parsed || !reachable(parsed, page.url())) {
+      log(`  건너뜀 받지 않는 주소 ${src.slice(0, 80)}`);
+      continue;
+    }
+    const url = parsed.href;
     try {
       const resp = await page.fetch(url, timeout, signal);
       if (!resp.ok) {

@@ -458,3 +458,49 @@ test('charsetForcedAcrossSites', async () => {
   }
   assert.deepEqual(outFiles(d).map(f => read(d, f)), ['본문 1 가나다', '본문 2 가나다']);
 });
+
+test('remotePageCannotPointAtLocalFiles', async () => {
+  // 이미지 주소와 next 주소는 원격 페이지가 정한다 → 웹 페이지가 로컬 파일을 받게 하거나 그쪽으로 넘기지 못한다.
+  const d = tempDir();
+  const secret = path.join(d, 'secret.png');
+  write(secret, PNG);
+  write(path.join(d, 'a1.png'), PNG);
+  const local = pathToFileURL(secret).href;
+  write(path.join(d, 'i1.html'), `<body><div id=c><img src="a1.png"><img src="${local}"></div><a class="next" aria-disabled="true" href="${local}">n</a></body>`);
+  const logs: string[] = [];
+  const srv = await serve(d);
+  try {
+    const pages = await scrape(`${srv.base}/i1.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+    assert.equal(pages, 1);
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
+  assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('secret.png')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('따라가지 않는다')), logs.join('\n'));
+});
+
+test('permissionsAndDownloadsDenied', async () => {
+  // 수집 창의 원격 페이지는 권한을 얻거나 파일을 내려받지 못한다.
+  const d = tempDir();
+  write(path.join(d, 'x.bin'), 'payload');
+  write(path.join(d, 'p.html'), '<meta charset="utf-8"><body><a id=dl download href="x.bin">받기</a></body>');
+  const srv = await serve(d);
+  const page = await Page.open();
+  const prevented: boolean[] = [];
+  page.win.webContents.session.on('will-download', e => prevented.push(e.defaultPrevented));
+  try {
+    await page.goto(`${srv.base}/p.html`, 5000);
+    const perms = await page.eval<string[]>(`Promise.all([
+      Notification.requestPermission(),
+      navigator.permissions.query({ name: 'geolocation' }).then(s => s.state),
+    ])`);
+    assert.deepEqual(perms, ['denied', 'denied']);
+    await page.click('#dl');
+    await new Promise(r => setTimeout(r, 500));
+    assert.deepEqual(prevented, [true]);
+  } finally {
+    page.close();
+    await srv.close();
+  }
+});
