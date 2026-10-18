@@ -422,7 +422,7 @@ class _FakePlaywright:
 
 def test_import_without_console():
     """창 모드 exe 는 콘솔이 없어 stdout·stderr 가 None 이다 → 가져오기만으로 죽으면 창이 뜨지 않는다."""
-    code = "import sys; sys.stdout = sys.stderr = None; import scrape, gui"
+    code = "import sys; sys.stdout = sys.stderr = None; import scrape"
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=Path(__file__).parent)
     assert r.returncode == 0, r.stderr
 

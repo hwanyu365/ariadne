@@ -1,5 +1,7 @@
 """gui 의 입력 검증을 tk.Tk() 없이 검증한다. test_scrape.py 가 함께 돌린다."""
 
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -116,3 +118,10 @@ def test_gui_window_fits_screen():
     assert window_height(1080) == 900
     for screen in (720, 600, 1000.5):
         assert window_height(screen) <= screen - 120, screen
+
+
+def test_gui_import_without_console():
+    """창 모드 exe 는 콘솔이 없어 stdout·stderr 가 None 이다 → 가져오기만으로 죽으면 창이 뜨지 않는다."""
+    code = "import sys; sys.stdout = sys.stderr = None; import gui"
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=Path(__file__).parent)
+    assert r.returncode == 0, r.stderr

@@ -72,9 +72,4 @@ python scrape.py <URL> -m image -t '#articleBody img' -n '.next' -o out/img
 python test_scrape.py
 ```
 
-exe 를 직접 만들려면 (Release 워크플로와 같은 명령):
-
-```sh
-pip install pyinstaller
-python -m PyInstaller --noconfirm --onefile --windowed --name ariadne --icon assets/ariadne.ico --add-data "assets/ariadne.ico;assets" --collect-data customtkinter gui.py
-```
+exe 를 직접 만들려면 `pip install pyinstaller` 후 `.github/workflows/release.yml` 의 `PyInstaller` 단계 명령을 저장소 루트에서 실행한다 → `dist/ariadne.exe`.
