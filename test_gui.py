@@ -1,6 +1,9 @@
 """gui 의 입력 검증을 tk.Tk() 없이 검증한다. test_scrape.py 가 함께 돌린다."""
 
-from gui import NUM_FIELDS, parse_inputs, pick_update
+import tempfile
+from pathlib import Path
+
+from gui import NUM_FIELDS, load_settings, log_level, parse_inputs, pick_update, progress, save_settings
 
 
 def _raw(**over):
@@ -71,3 +74,39 @@ def test_gui_valid_input_parsed():
     text, nums = parse_inputs(_raw(url=" http://x ", max=" 5 ", delay=""), probe=False)
     assert text["url"] == "http://x", text
     assert nums == {"max": 5, "start": 1, "digits": 4, "timeout": 15000, "delay": 0}, nums
+
+
+def test_gui_settings_roundtrip():
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "sub" / "settings.json"
+        values = {"url": "http://x", "sel": "#c", "max": "5", "mode": "image", "headful": True}
+        save_settings(path, values)
+        assert load_settings(path) == values
+
+
+def test_gui_settings_tolerates_broken_file():
+    """설정 파일 때문에 앱이 안 켜지면 안 된다 → 아는 키·맞는 타입만 살린다."""
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "settings.json"
+        assert load_settings(path) == {}
+        for broken in ("{", "[]", '"x"', "null"):
+            path.write_text(broken, encoding="utf-8")
+            assert load_settings(path) == {}, broken
+        path.write_text('{"url": "http://x", "sel": 1, "모름": "x", "mode": "video", "headful": "yes"}', encoding="utf-8")
+        assert load_settings(path) == {"url": "http://x"}
+
+
+def test_gui_progress_reads_page_lines():
+    assert progress("[3] 1200자 -> page_0003.txt") == (3, "page_0003.txt")
+    assert progress("[12] 이미지 4장 -> img_0012_*") == (12, "img_0012_*")
+    for other in ("  중단: 사용자 중지.", "완료: 3개 페이지", "[본문] #c   후보: #c(1)", ""):
+        assert progress(other) is None, other
+
+
+def test_gui_log_level():
+    assert log_level("  경고: 제목 셀렉터 '#t' 에 걸리는 요소가 없다.") == "warn"
+    assert log_level("실패: TimeoutError: x") == "error"
+    assert log_level("  중단: 사용자 중지.") == "info"
+    assert log_level("\n주의: iframe 2개.") == "warn"
+    assert log_level("  건너뜀 HTTP 404 http://x/a.png") == "warn"
+    assert log_level("[1] 10자 -> page_0001.txt") is None

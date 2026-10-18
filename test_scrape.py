@@ -415,7 +415,9 @@ if __name__ == "__main__":
     merge(test_picker)
     try:
         import test_gui         # tkinter 가 없는 환경을 위해 이것만 선택적이다
-    except ImportError as e:
+    except ModuleNotFoundError as e:
+        if e.name not in ("tkinter", "_tkinter"):
+            raise               # gui 의 다른 의존성이 빠진 것은 skip 이 아니라 실패다
         print(f"  skip test_gui: {e}")
     else:
         merge(test_gui)
