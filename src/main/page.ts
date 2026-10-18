@@ -202,11 +202,14 @@ export class Page {
     })`;
     const deadline = Date.now() + timeout;
     type At = { x: number; y: number; ready: boolean; why: string } | null;
-    let at = await this.evalSoon<At>(measure);
-    while (at && !at.ready && Date.now() < deadline) at = await this.evalSoon<At>(measure);
-    if (!at) throw new Error(`셀렉터 ${JSON.stringify(selector)} 에 걸리는 요소가 없다.`);
+    let at: At | undefined;
+    // 평가가 실패하면(undefined) 문서가 바뀌는 중일 수 있다 → 요소가 없는 것(null)과 달리 기한 안에서 다시 잰다.
+    do {
+      at = await this.evalSoon<At>(measure);
+      if (at === null) throw new Error(`셀렉터 ${JSON.stringify(selector)} 에 걸리는 요소가 없다.`);
+    } while (!at?.ready && Date.now() < deadline);
     // 덮은 요소를 누르면 엉뚱한 곳이 반응하고 원인이 가려진다 → 못 누른 사유로 돌려준다.
-    if (!at.ready) throw new Error(`${timeout}ms 동안 ${JSON.stringify(selector)} 를 누를 수 없었다: ${at.why}.`);
+    if (!at?.ready) throw new Error(`${timeout}ms 동안 ${JSON.stringify(selector)} 를 누를 수 없었다: ${at?.why ?? '페이지를 평가하지 못했다'}.`);
     // 사람처럼 포인터를 먼저 올린 뒤 누른다 → hover 를 거쳐야 클릭을 받는 페이지가 있다.
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
     for (const type of ['mousePressed', 'mouseReleased'])

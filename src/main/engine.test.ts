@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { BrowserWindow } from 'electron';
 import { type Handler, serve, staticFile, tempDir } from '../test/serve';
-import { probe, scrape, type ScrapeOptions } from './engine';
+import { probe, reachable, scrape, type ScrapeOptions } from './engine';
 import { Page } from './page';
 
 const PNG = Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n', 'latin1'), Buffer.from('fixture'.repeat(4))]);
@@ -525,4 +525,47 @@ test('stopsWithReasonOnBrokenNextHref', async () => {
   const n = await scrape(pathToFileURL(path.join(d, 'h.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
   assert.equal(n, 1);
   assert.ok(logs.some(l => l.includes('중단') && l.includes('해석할 수 없다')), logs.join('\n'));
+});
+
+test('reachableAllowsWebAndSameSchemeOnly', () => {
+  // 원격 페이지가 정한 주소는 웹 주소이거나 지금 페이지와 같은 스킴일 때만 따라간다.
+  const cases: [string, string, boolean][] = [
+    ['http://a/x.png', 'http://a/p.html', true],
+    ['https://a/x.png', 'http://a/p.html', true],
+    ['http://a/x.png', 'https://a/p.html', true],
+    ['file:///C:/secret.png', 'http://a/p.html', false],
+    ['ftp://a/x.png', 'http://a/p.html', false],
+    ['data:image/png;base64,AAAA', 'https://a/p.html', false],
+    ['file:///C:/d/x.png', 'file:///C:/d/p.html', true],
+    ['ftp://a/x.png', 'file:///C:/d/p.html', false],
+  ];
+  for (const [url, page, want] of cases) assert.equal(reachable(new URL(url), page), want, `${url} from ${page}`);
+});
+
+test('stopsWithReasonWhenNextHrefUnreachable', async () => {
+  // 숨겨진 next 의 주소로 이동하지 못하면 예외로 끝내지 않고 이유를 남긴다.
+  const closed = await serve(tempDir());
+  await closed.close();                 // 방금 비운 포트 → 연결 거부
+  const d = tempDir();
+  const logs: string[] = [];
+  write(path.join(d, 'u.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" aria-disabled="true" href="${closed.base}/x">n</a></body>`);
+  const n = await scrape(pathToFileURL(path.join(d, 'u.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
+  assert.equal(n, 1);
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('이동하지 못했다')), logs.join('\n'));
+});
+
+test('imagePageWithoutAddressesSavesNothing', async () => {
+  // 주소가 아직 없거나 전부 data: 인 페이지에서 페이지 자체를 이미지로 받지 않는다.
+  const d = tempDir();
+  write(path.join(d, 'e.html'), '<body><div id=c><img src="data:image/png;base64,AAAA"><img></div><a class="next" aria-disabled="true">n</a></body>');
+  const logs: string[] = [];
+  const srv = await serve(d);
+  try {
+    const pages = await scrape(`${srv.base}/e.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+    assert.equal(pages, 1);
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), []);
+  assert.ok(logs.some(l => l.startsWith('[1] 이미지 0장')), logs.join('\n'));
 });

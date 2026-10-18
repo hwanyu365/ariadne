@@ -15,6 +15,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊어 merge 판정이 pending 에 갇히지 않게 한다.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       # .gitignore 가 놓친 비밀 파일이 추적되면 merge 전에 막는다. 값 없는 예시 파일(*.example)은 허용한다.

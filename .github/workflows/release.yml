@@ -12,6 +12,8 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊어 merge 판정이 pending 에 갇히지 않게 한다.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

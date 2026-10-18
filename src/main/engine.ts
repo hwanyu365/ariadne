@@ -76,7 +76,7 @@ async function waitChange(page: Page, selector: string, old: string, timeout: nu
 }
 
 /** 주소는 원격 페이지가 정한다 → 웹 주소이거나 지금 페이지와 같은 스킴일 때만 따라간다. 원격 페이지가 로컬 파일을 가리키게 하지 않는다. */
-function reachable(url: URL, pageUrl: string): boolean {
+export function reachable(url: URL, pageUrl: string): boolean {
   return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === new URL(pageUrl).protocol;
 }
 
@@ -106,7 +106,11 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
     const to = URL.parse(state.href, page.url());
     if (!to) return `next 의 주소 ${state.href.slice(0, 80)} 를 해석할 수 없다.`;
     if (!reachable(to, page.url())) return `next 의 주소 ${to.href.slice(0, 80)} 는 따라가지 않는다.`;
-    await page.goto(to.href, timeout);
+    try {
+      await page.goto(to.href, timeout);
+    } catch (e) {
+      return `next 의 주소로 이동하지 못했다: ${firstLine(e)}`;
+    }
     return null;
   }
   return 'next 요소는 있으나 숨김/비활성이고 href 도 없다. 마지막 페이지로 본다.';
@@ -138,6 +142,7 @@ async function saveImages(page: Page, srcs: string[], prefix: string, num: numbe
       fs.writeFileSync(out, Buffer.from(await resp.arrayBuffer()));
       saved++;
     } catch (e) {
+      if (signal?.aborted) break;      // 사용자 중지는 남은 장을 하나씩 실패로 남기지 않는다
       log(`  건너뜀 ${url.slice(0, 80)} (${firstLine(e).slice(0, 60)})`);
     }
   }
@@ -178,7 +183,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
       const num = start + pages - 1;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
-        const n = await saveImages(page, current.split('\n'), base, num, digits, log, timeout, o.signal);
+        const n = await saveImages(page, current.split('\n').filter(Boolean), base, num, digits, log, timeout, o.signal);
         log(`[${pages}] 이미지 ${n}장 -> ${path.basename(base)}_${pad(num, digits)}_*`);
       } else {
         const { size, name } = await saveText(page, current, base, num, digits, titleSel, log);
