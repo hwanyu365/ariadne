@@ -12,6 +12,8 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊어 merge 판정이 pending 에 갇히지 않게 한다.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -19,8 +21,13 @@ jobs:
           python-version: "3.13"
       - run: pip install -r requirements.txt
       - run: python -m playwright install --with-deps chromium
-      - run: |
-          python test_scrape.py
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: xvfb-run -a npm run verify
 
   # Chromium 은 싣지 않는다 → 실행 환경의 Edge 로 뜬다.
   # exe 를 만든 뒤에 Release 를 만든다 → 빌드가 실패하면 exe 없는 Release 가 남지 않는다.

@@ -69,7 +69,8 @@ python scrape.py <URL> -m image -t '#articleBody img' -n '.next' -o out/img
 이 저장소는 [ADD](https://github.com/hwanyu365/add-project) 로 개발한다. 규칙은 [CLAUDE.md](CLAUDE.md), 스펙은 [docs/specification.md](docs/specification.md).
 
 ```sh
-python test_scrape.py
+npm ci
+npm run verify
 ```
 
 exe 를 직접 만들려면 `pip install pyinstaller` 후 `.github/workflows/release.yml` 의 `PyInstaller` 단계 명령을 저장소 루트에서 실행한다 → `dist/ariadne.exe`.
