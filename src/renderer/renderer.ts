@@ -70,21 +70,20 @@ interface Api {
 
   async function start(kind: Kind) {
     if (running) return;
-    running = true;                      // 응답을 기다리는 사이에 다시 눌러도 두 번 시작하지 않는다
-    const got = await api.start({ kind, values: values(), mode, headful: headful.checked });
+    // 엔진이 곧바로 실패하면 로그·종료 알림이 시작 응답보다 먼저 온다 → 화면을 먼저 실행 상태로 바꾸고, 거부될 때만 되돌린다.
     log.textContent = '';
-    if (got.error) {
-      running = false;
-      write(`실패: ${got.error}`, 'error');
-      setState('입력 확인', 'check');
-      return;
-    }
     failed = false;
     started = Date.now();
     st.pages.textContent = '';
     st.file.textContent = '';
     setState(LABEL[kind], 'running');
     setRunning(true);
+    const got = await api.start({ kind, values: values(), mode, headful: headful.checked });
+    if (got.error) {
+      setRunning(false);
+      write(`실패: ${got.error}`, 'error');
+      setState('입력 확인', 'check');
+    }
   }
 
   api.onLog(({ text, level, progress }) => {

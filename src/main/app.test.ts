@@ -142,3 +142,35 @@ test('closingWindowStopsRun', async () => {
   }
   assert.ok(fs.readdirSync(path.join(d, 'out')).length < 20, '창을 닫은 뒤에도 끝까지 받았다');
 });
+
+test('windowShowsImmediateFailure', async () => {
+  // 엔진이 곧바로 실패해 종료 알림이 시작 응답보다 먼저 와도 화면이 '실행 중' 으로 굳지 않는다.
+  const d = tempDir();
+  fs.writeFileSync(path.join(d, 'blocker'), '');      // 폴더가 있어야 할 자리에 파일 → 저장 폴더를 만들지 못한다
+  const win = await open();
+  try {
+    await fill(win, { url: fixture(d), sel: '#c', next: '.next', prefix: path.join(d, 'blocker', 'sub', 'p') });
+    await win.webContents.executeJavaScript(`document.querySelector('#run').click()`);
+    const state = await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v), 5000);
+    await sleep(300);
+    assert.match(await win.webContents.executeJavaScript(`document.querySelector('#st-state').textContent`), /실패/, state);
+    assert.equal(await win.webContents.executeJavaScript(`document.querySelector('#run').disabled`), false);
+  } finally {
+    win.destroy();
+  }
+});
+
+test('mainWindowStaysOnItsOwnPage', async () => {
+  // 화면 창은 앱이 가진 파일만 연다 → 새 창이나 다른 문서로 넘어가 preload 통로를 내주지 않는다.
+  const { BrowserWindow } = await import('electron');
+  const win = await open();
+  try {
+    const before = BrowserWindow.getAllWindows().length;
+    await win.webContents.executeJavaScript(`window.open('https://example.com/'); location.href = 'https://example.com/'; void 0`);
+    await sleep(800);
+    assert.equal(BrowserWindow.getAllWindows().length, before, '새 창이 열렸다');
+    assert.match(win.webContents.getURL(), /static\/index\.html$/, '다른 문서로 이동했다');
+  } finally {
+    win.destroy();
+  }
+});
