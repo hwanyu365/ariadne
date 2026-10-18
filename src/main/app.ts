@@ -55,6 +55,8 @@ export function registerIpc(opts: { settingsPath: string; defaultPrefix: string 
     const log = (text: string) => send('run:log', { text, level: logLevel(text), progress: progress(text) });
     const ctl = new AbortController();
     running = ctl;
+    // 창이 사라지면 결과를 받을 곳도 없다 → 숨은 수집과 선택기 창을 남기지 않는다.
+    wc.once('destroyed', () => ctl.abort());
     void run(req, args, ctl.signal, log, u => send('run:pick', u)).finally(() => {
       running = null;
       send('run:done', { stopped: ctl.signal.aborted });

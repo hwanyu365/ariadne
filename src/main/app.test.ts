@@ -36,7 +36,9 @@ async function open(): Promise<BrowserWindow> {
   return win;
 }
 
+// 앞 테스트가 저장한 설정이 다음 창에 복원된다 → 모드는 텍스트에서 시작한다.
 const fill = (win: BrowserWindow, values: Record<string, string>) => win.webContents.executeJavaScript(`(() => {
+  document.querySelector('[data-mode="text"]').click();
   for (const [k, v] of Object.entries(${JSON.stringify(values)})) {
     const e = document.querySelector('[name="' + k + '"]');
     e.value = v;
@@ -92,4 +94,51 @@ test('windowRestoresSavedInputs', async () => {
   } finally {
     second.destroy();
   }
+});
+
+test('doubleStartKeepsRunState', async () => {
+  // 응답을 기다리는 사이에 다시 눌러도 진행 중인 수집의 로그와 상태를 지우지 않는다.
+  const d = tempDir();
+  const win = await open();
+  try {
+    await fill(win, { url: fixture(d), sel: '#c', next: '.next', prefix: path.join(d, 'out', 'p') });
+    await win.webContents.executeJavaScript(`document.querySelector('#run').click(); document.querySelector('#run').click();`);
+    const state = await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패|입력 확인/.test(v));
+    assert.match(state, /완료/);
+    assert.match(await win.webContents.executeJavaScript(`document.querySelector('#log').textContent`), /\[3\]/);
+  } finally {
+    win.destroy();
+  }
+});
+
+test('closingWindowStopsRun', async () => {
+  // 창이 사라지면 결과를 받을 곳이 없다 → 수집을 멈추고 다음 창에서 다시 시작할 수 있다.
+  const d = tempDir();
+  for (let i = 1; i <= 20; i++) {
+    const nxt = i < 20 ? `<a class="next" href="q${i + 1}.html">next</a>` : '<a class="next" aria-disabled="true">next</a>';
+    fs.writeFileSync(path.join(d, `q${i}.html`), `<meta charset="utf-8"><body><div id=c>본문 ${i}</div>${nxt}</body>`);
+  }
+  const first = await open();
+  await fill(first, { url: pathToFileURL(path.join(d, 'q1.html')).href, sel: '#c', next: '.next', prefix: path.join(d, 'out', 'q'), delay: '300' });
+  await first.webContents.executeJavaScript(`document.querySelector('#run').click()`);
+  await until<string>(first, `document.querySelector('#log').textContent`, v => v.includes('[1]'));
+  first.destroy();
+  const second = await open();
+  try {
+    await fill(second, { url: fixture(tempDir()), sel: '#c', next: '.next', delay: '0' });
+    const deadline = Date.now() + 5000;
+    let state = '';
+    while (Date.now() < deadline) {
+      await second.webContents.executeJavaScript(`document.querySelector('#run').click()`);
+      await sleep(200);
+      state = await second.webContents.executeJavaScript(`document.querySelector('#st-state').textContent`);
+      if (!state.includes('입력 확인')) break;
+      await sleep(300);
+    }
+    assert.doesNotMatch(state, /입력 확인/, '앞 창의 수집이 계속 돌아 새 창에서 시작하지 못했다');
+    await until<string>(second, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v));
+  } finally {
+    second.destroy();
+  }
+  assert.ok(fs.readdirSync(path.join(d, 'out')).length < 20, '창을 닫은 뒤에도 끝까지 받았다');
 });

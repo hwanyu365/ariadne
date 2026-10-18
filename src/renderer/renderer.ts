@@ -70,9 +70,11 @@ interface Api {
 
   async function start(kind: Kind) {
     if (running) return;
-    log.textContent = '';
+    running = true;                      // 응답을 기다리는 사이에 다시 눌러도 두 번 시작하지 않는다
     const got = await api.start({ kind, values: values(), mode, headful: headful.checked });
+    log.textContent = '';
     if (got.error) {
+      running = false;
       write(`실패: ${got.error}`, 'error');
       setState('입력 확인', 'check');
       return;
