@@ -3,50 +3,69 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  # 태그 전에 exe 빌드만 확인한다. Release 는 만들지 않고 산출물을 artifact 로 남긴다.
+  # 태그 전에 세 OS 빌드만 확인한다. Release 는 만들지 않고 산출물을 artifact 로 남긴다.
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊어 merge 판정이 pending 에 갇히지 않게 한다.
+    # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊는다.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-      - run: pip install -r requirements.txt
-      - run: python -m playwright install --with-deps chromium
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
       - run: npm ci
+      # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스가 뜨지 않는다.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: xvfb-run -a npm run verify
 
-  # Chromium 은 싣지 않는다 → 실행 환경의 Edge 로 뜬다.
-  # exe 를 만든 뒤에 Release 를 만든다 → 빌드가 실패하면 exe 없는 Release 가 남지 않는다.
-  release:
+  build:
     needs: test
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-node@v7
         with:
-          python-version: "3.13"
-      - run: pip install -r requirements.txt pyinstaller==6.22.3
-      - run: python -m PyInstaller --noconfirm --onefile --windowed --name ariadne --icon assets/ariadne.ico --add-data "assets/ariadne.ico;assets" --collect-data customtkinter gui.py
-      - if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run dist
+      - uses: actions/upload-artifact@v7
         with:
-          name: ariadne-exe
-          path: dist/ariadne.exe
-      - if: github.event_name == 'push'
-        env:
+          name: ariadne-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.zip
+            release/*.AppImage
+          if-no-files-found: error
+
+  # 세 OS 산출물이 모두 있을 때만 Release 를 만든다 → 일부 OS 만 빠진 Release 가 남지 않는다.
+  release:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      # 산출물 이름은 package.json 의 version 을 쓴다 → 태그와 다르면 다른 버전 파일이 Release 에 올라간다.
+      - run: |
+          want="v$(node -p 'require("./package.json").version')"
+          if [ "$want" != "$GITHUB_REF_NAME" ]; then echo "::error::태그 $GITHUB_REF_NAME 와 package.json 버전 $want 이 다르다"; exit 1; fi
+      - uses: actions/download-artifact@v8
+        with:
+          path: out
+          merge-multiple: true
+      - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$env:GITHUB_REF_NAME" dist/ariadne.exe --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" out/* --generate-notes --verify-tag
