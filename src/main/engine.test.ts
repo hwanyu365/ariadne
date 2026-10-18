@@ -63,10 +63,11 @@ async function runImages(attr: string, n = 3, opts: ScrapeOptions = {}) {
   const d = tempDir();
   writeImagePages(d, n, attr);
   const srv = await serve(d);
+  const logs: string[] = [];
   try {
-    const pages = await scrape(`${srv.base}/i1.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 5000, mode: 'image', ...quiet, ...opts });
+    const pages = await scrape(`${srv.base}/i1.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 5000, mode: 'image', onLog: m => logs.push(m), ...opts });
     const names = outFiles(d, /./);
-    return { pages, names, blobs: names.map(f => fs.readFileSync(path.join(d, 'out', f))) };
+    return { pages, names, blobs: names.map(f => fs.readFileSync(path.join(d, 'out', f))), log: logs.join('|') };
   } finally {
     await srv.close();
   }
@@ -184,16 +185,16 @@ test('titleSelectorMissing', async () => {
 });
 
 test('imageModeSavesEveryPage', async () => {
-  const { pages, names, blobs } = await runImages('src');
-  assert.equal(pages, 3);
+  const { pages, names, blobs, log } = await runImages('src');
+  assert.equal(pages, 3, log);
   assert.deepEqual(names, [1, 2, 3].flatMap(p => [1, 2].map(i => `p_${String(p).padStart(4, '0')}_${String(i).padStart(3, '0')}.png`)));
   assert.ok(blobs.every(b => b.equals(PNG)), blobs.map(b => b.length).join(','));
 });
 
 test('imageModeReadsDataSrc', async () => {
   // 주소가 data-src 에만 있어도 받는다. src 가 비어 크기가 0 인 img 도 대상이다.
-  const { pages, names, blobs } = await runImages('data-src', 2);
-  assert.equal(pages, 2);
+  const { pages, names, blobs, log } = await runImages('data-src', 2);
+  assert.equal(pages, 2, log);
   assert.deepEqual(names, ['p_0001_001.png', 'p_0001_002.png', 'p_0002_001.png', 'p_0002_002.png']);
   assert.ok(blobs.every(b => b.equals(PNG)));
 });
