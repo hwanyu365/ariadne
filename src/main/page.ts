@@ -207,6 +207,8 @@ export class Page {
     if (!at) throw new Error(`셀렉터 ${JSON.stringify(selector)} 에 걸리는 요소가 없다.`);
     // 덮은 요소를 누르면 엉뚱한 곳이 반응하고 원인이 가려진다 → 못 누른 사유로 돌려준다.
     if (!at.ready) throw new Error(`${timeout}ms 동안 ${JSON.stringify(selector)} 를 누를 수 없었다: ${at.why}.`);
+    // 사람처럼 포인터를 먼저 올린 뒤 누른다 → hover 를 거쳐야 클릭을 받는 페이지가 있다.
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
     for (const type of ['mousePressed', 'mouseReleased'])
       await this.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
   }
