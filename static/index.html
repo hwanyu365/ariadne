@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+  <title>ariadne</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="head">
+    <h1>ariadne</h1>
+    <p class="muted">페이지네이션을 끝까지 넘기며 본문과 이미지를 받아 둡니다</p>
+    <div class="url-row">
+      <input name="url" class="url" placeholder="첫 페이지 주소 (https://…)" spellcheck="false" autofocus>
+      <div class="segmented" role="group" aria-label="모드">
+        <button type="button" data-mode="text" aria-pressed="true">텍스트</button>
+        <button type="button" data-mode="image" aria-pressed="false">이미지</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>셀렉터</h2>
+      <div class="tools">
+        <button type="button" id="pick" class="ghost busy">요소 선택</button>
+        <button type="button" id="probe" class="ghost busy">probe</button>
+      </div>
+    </div>
+    <label class="field"><span>수집 대상</span><input name="sel" spellcheck="false"></label>
+    <p class="caption" id="hint"></p>
+    <label class="field"><span>next 버튼</span><input name="next" spellcheck="false"></label>
+    <label class="field"><span id="title-label">제목 (선택)</span><input name="title" spellcheck="false"></label>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>저장</h2></div>
+    <div class="field">
+      <span>경로 접두사</span>
+      <input name="prefix" spellcheck="false">
+      <button type="button" id="pick-dir" class="accent">폴더 선택</button>
+      <button type="button" id="open-dir" class="ghost">열기</button>
+    </div>
+    <p class="caption">…/page → page_0001.txt</p>
+  </section>
+
+  <details class="advanced">
+    <summary>고급 옵션</summary>
+    <div class="card">
+      <div class="row">
+        <label class="inline">인코딩 <input name="charset" class="short" spellcheck="false"></label>
+        <span class="caption">비우면 브라우저가 추정. 한글이 깨지면 utf-8</span>
+        <label class="switch"><input type="checkbox" name="headful"><span>브라우저 창 띄우기</span></label>
+      </div>
+      <div class="grid">
+        <label>최대 페이지 (0=끝까지)<input name="max" inputmode="numeric"></label>
+        <label>시작 번호<input name="start" inputmode="numeric"></label>
+        <label>자릿수<input name="digits" inputmode="numeric"></label>
+        <label>타임아웃 ms<input name="timeout" inputmode="numeric"></label>
+        <label>페이지 간 대기 ms<input name="delay" inputmode="numeric"></label>
+      </div>
+    </div>
+  </details>
+
+  <div class="actions">
+    <button type="button" id="run" class="primary busy">수집 시작 <kbd id="run-key">Ctrl+Enter</kbd></button>
+    <button type="button" id="stop" class="secondary" disabled>중지 <kbd>Esc</kbd></button>
+  </div>
+
+  <pre id="log" class="log" aria-live="polite"></pre>
+
+  <footer class="status">
+    <span id="st-state" class="muted">● 대기</span>
+    <span id="st-pages" class="muted"></span>
+    <span id="st-file" class="muted file"></span>
+    <span id="st-time" class="muted"></span>
+  </footer>
+
+  <script src="../dist/renderer/renderer.js"></script>
+</body>
+</html>

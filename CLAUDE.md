@@ -31,7 +31,10 @@
 
 ## 기술 스택
 
-- Python 3.13 + Playwright (SPA 처럼 URL 이 바뀌지 않는 페이지네이션도 넘겨야 해서 HTTP 클라이언트 대신 실제 브라우저를 쓴다) + tkinter (stdlib, UI 때문에 의존성을 늘리지 않는다)
+- Electron + TypeScript
+  - SPA 처럼 URL 이 바뀌지 않는 페이지네이션도 넘겨야 해서 HTTP 클라이언트 대신 실제 브라우저를 쓴다 → 앱에 내장된 Chromium 이라 OS 마다 브라우저를 따로 설치하게 하지 않는다
+  - 페이지 조작은 Playwright 없이 Electron API + CDP 로 한다 → Playwright 는 Electron 자신의 Chromium 에 붙는 방식을 지원하지 않는다
+- 패키징: electron-builder (Windows portable exe, macOS zip, Linux AppImage)
 - 위 목록 밖의 의존성 추가는 PR 본문에 이유를 적는다.
 
 ## 개발 절차
@@ -40,7 +43,7 @@ SDD + TDD: 이슈 → 스펙 갱신 → TC 작성(Red) → 구현(Green) → Ref
 
 - 기능: 스펙에 US·FR·NFR 과 대응 TC 를 먼저 적는다. `[확인필요]` 가 남아 있으면 구현하지 않는다.
 - 버그: 재현 테스트를 먼저 작성해 실패(Red)를 확인한 뒤 고친다. 스펙과 코드 중 어느 쪽이 틀렸는지 먼저 판정한다.
-- 테스트 위치: 소스와 같은 디렉터리에 `test_{module}.py`
+- 테스트 위치: 소스와 같은 디렉터리에 `{module}.test.ts`. 엔진 테스트가 창을 띄우므로 전부 Electron 안에서 돈다 (`src/test-runner.ts`)
 - 테스트 이름은 스펙의 `TC#n` 으로 시작한다.
 - Red 에서 만든 테스트는 Green 에서 지우거나 약화하지 않는다. 바꿔야 하면 이유를 PR 에 적고 저장소 소유자 승인을 받는다.
 - 핵심 로직은 플랫폼 의존성 없이 두어 빠른 단위 테스트로 검증한다.
