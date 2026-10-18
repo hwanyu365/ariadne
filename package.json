@@ -1,0 +1,17 @@
+{
+  "name": "ariadne",
+  "version": "0.2.0",
+  "description": "페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 데스크톱 도구",
+  "private": true,
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && electron dist/test-runner.js",
+    "verify": "python test_scrape.py && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "electron": "44.5.1",
+    "typescript": "6.0.3"
+  }
+}

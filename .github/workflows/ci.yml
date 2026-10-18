@@ -15,6 +15,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊어 merge 판정이 pending 에 갇히지 않게 한다.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       # .gitignore 가 놓친 비밀 파일이 추적되면 merge 전에 막는다. 값 없는 예시 파일(*.example)은 허용한다.
@@ -27,6 +29,12 @@ jobs:
           python-version: "3.13"
       - run: pip install -r requirements.txt
       - run: python -m playwright install --with-deps chromium
-      # 비밀값 없이 실행한다 → fork PR 에서도 같은 결과여야 한다.
-      - run: |
-          python test_scrape.py
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스가 뜨지 않는다.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # 비밀값 없이 실행한다 → fork PR 에서도 같은 결과여야 한다. 로컬과 같은 명령을 화면 없는 X 서버에서 돌린다.
+      - run: xvfb-run -a npm run verify
