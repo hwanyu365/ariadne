@@ -5,25 +5,20 @@
 이름은 미로에서 길을 되짚게 해 준 아리아드네의 실에서 왔다.
 
 - 창에 URL 과 셀렉터를 넣고 시작하면 next 를 끝까지 누르며 페이지마다 파일로 쓴다
-- 셀렉터를 모르면 `probe` 로 후보를 먼저 찾는다
+- 셀렉터를 모르면 `요소 선택` 이나 `probe` 로 찾는다
 - URL 이 바뀌지 않는 SPA 도 수집 대상이 실제로 바뀌는지 보고 넘긴다
 
-## 설치 없이 쓰기 (Windows)
+## 설치 없이 쓰기
 
-1. [Releases](https://github.com/hwanyu365/ariadne/releases/latest) 에서 `ariadne.exe` 를 받는다
-2. 아무 폴더에 두고 실행한다. 설치·Python 이 필요 없다
+[Releases](https://github.com/hwanyu365/ariadne/releases/latest) 에서 OS 에 맞는 파일 하나를 받아 실행한다. 브라우저는 앱에 들어 있어 따로 설치할 것이 없다.
 
-- 브라우저는 Windows 에 기본 탑재된 Microsoft Edge 를 쓴다 → Edge 를 지웠다면 다시 설치해야 한다
-- 코드 서명이 없어 처음 실행할 때 SmartScreen 경고가 뜬다 → `추가 정보` → `실행`
-- 입력값은 `%APPDATA%/ariadne/settings.json` 에 남는다. 지우려면 그 폴더를 지운다
+| OS | 파일 | 처음 실행할 때 |
+| --- | --- | --- |
+| Windows x64 | `ariadne-{버전}-win-x64.exe` | 서명이 없어 SmartScreen 경고 → `추가 정보` → `실행` |
+| macOS (Apple Silicon) | `ariadne-{버전}-mac-arm64.zip` | 압축을 풀고 `ariadne.app` 을 우클릭 → `열기` (Gatekeeper 경고) |
+| Linux x64 | `ariadne-{버전}-linux-x86_64.AppImage` | `chmod +x` 후 실행 |
 
-## 개발 환경에서 실행
-
-```sh
-pip install -r requirements.txt
-python -m playwright install chromium
-python gui.py
-```
+- 입력값은 바뀔 때마다 사용자 데이터 폴더의 `ariadne/settings.json` 에 남는다 (Windows `%APPDATA%`, macOS `~/Library/Application Support`, Linux `~/.config`). 지우려면 그 폴더를 지운다.
 
 ## 사용법
 
@@ -36,32 +31,20 @@ python gui.py
 | 인코딩 (고급 옵션) | 비우면 브라우저가 추정한다. 한글이 깨지면 `utf-8` 처럼 지정한다 → 로그에 "utf-8 로 보이는데" 경고가 뜨면 이 경우다 |
 | 저장 경로 접두사 | 기본 `다운로드/ariadne/page` → `page_0001.txt`. `열기` 로 그 폴더를 연다 |
 
-- **셀렉터를 모를 때는 URL 만 넣고 `요소 선택`** → 브라우저가 뜨고 마우스를 올린 요소가 빨갛게 표시된다. 클릭하면 셀렉터 후보가 매치 수와 함께 뜨고, 고른 것이 입력란에 들어간다.
-  - 페이지 위 툴바에서 본문·next·제목을 전환한다. 브라우저는 한 번만 뜬다.
+- **셀렉터를 모를 때는 URL 만 넣고 `요소 선택`** → 브라우저 창이 뜨고 마우스를 올린 요소가 빨갛게 표시된다. 클릭하면 셀렉터 후보가 매치 수와 함께 뜨고, 고른 것이 입력란에 들어간다.
+  - 페이지 위 툴바에서 본문·next·제목을 전환한다. 창은 한 번만 뜬다.
   - 매치 수가 1이 아니면 경고가 붙는다 → 상태 클래스가 섞여 다음 페이지에서 깨질 수 있다는 뜻이다.
   - 툴바가 고르려는 요소를 가리면 `위치` 로 옮긴다. 다 고르면 `완료` 또는 `중지`.
 - `probe` 는 후보를 목록으로 훑어볼 때 쓴다 → next·본문·이미지 후보와 iframe 유무를 로그에 뽑아 준다. `브라우저 창 띄우기` 와 함께 쓰면 실제 화면을 보며 맞출 수 있다.
 - 수집 중 `중지` 는 현재 페이지를 마친 뒤 멈춘다. 그때까지 받은 파일은 남는다.
-- 단축키: `Ctrl+Enter` 수집 시작, `Esc` 중지. 하단 상태바에 받은 페이지 수·마지막 파일·경과 시간이 뜬다.
+- 단축키: `Ctrl+Enter`(macOS `⌘↵`) 수집 시작, `Esc` 중지. 하단 상태바에 받은 페이지 수·마지막 파일·경과 시간이 뜬다.
 - 숫자 옵션·인코딩·브라우저 창 띄우기는 `고급 옵션` 을 펼쳐서 바꾼다.
-- 입력값은 창을 닫을 때 `%APPDATA%/ariadne/settings.json` 에 저장돼 다음 실행에 채워진다.
-
-## CLI
-
-같은 기능을 명령줄에서 쓸 수 있다.
-
-```sh
-python scrape.py <URL> --probe                                  # 셀렉터 후보 찾기
-python scrape.py <URL> -t '#articleBody' -n '.next' -o out/page  # 텍스트
-python scrape.py <URL> -m image -t '#articleBody img' -n '.next' -o out/img
-```
-
-`-h` 로 전체 옵션(`--max`, `--start`, `--digits`, `--timeout`, `--delay`, `--headful`, `--charset`)을 본다.
 
 ## 안 되는 것
 
 - 로그인·캡차가 필요한 페이지, iframe 안의 본문
 - 받은 파일의 후처리(ePub 변환, 이미지 합치기)
+- 명령줄 실행
 - 수집 대상 사이트의 이용약관·robots 정책 준수는 사용자 책임이다
 
 ## 개발
@@ -70,7 +53,7 @@ python scrape.py <URL> -m image -t '#articleBody img' -n '.next' -o out/img
 
 ```sh
 npm ci
-npm run verify
+npm start          # 앱 실행
+npm run verify     # 검증 (CI 와 같은 명령)
+npm run dist       # 지금 OS 의 실행 파일 → release/
 ```
-
-exe 를 직접 만들려면 `pip install pyinstaller` 후 `.github/workflows/release.yml` 의 `PyInstaller` 단계 명령을 저장소 루트에서 실행한다 → `dist/ariadne.exe`.

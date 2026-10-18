@@ -1,0 +1,134 @@
+:root {
+  --bg: #f3f4f6;
+  --card: #ffffff;
+  --line: #d7dae0;
+  --text: #16181d;
+  --muted: #6b7280;
+  --accent: #2f6fdb;
+  --accent-hover: #2559b3;
+  --field: #ffffff;
+  --log: #fafafa;
+  --warn: #b7791f;
+  --error: #d64545;
+  --info: #3b7ddd;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1d1f23;
+    --card: #26292e;
+    --line: #3a3e45;
+    --text: #e8e9eb;
+    --muted: #9aa0a8;
+    --accent: #3d7ee6;
+    --accent-hover: #5590ee;
+    --field: #1f2226;
+    --log: #1a1c1f;
+    --warn: #e0b04a;
+    --error: #f07070;
+    --info: #6aa2f0;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 16px 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+}
+
+h1 { margin: 0; font-size: 22px; font-weight: 700; }
+h2 { margin: 0; font-size: 14px; font-weight: 700; }
+.muted { color: var(--muted); }
+.head p { margin: 2px 0 10px; }
+
+input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+input:disabled { opacity: .45; }
+
+.url-row { display: flex; gap: 8px; }
+.url { flex: 1; height: 38px; font-size: 14px; }
+
+button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+button:disabled { cursor: default; opacity: .5; }
+.ghost { background: transparent; border-color: var(--line); color: var(--text); }
+.ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--line) 40%, transparent); }
+.accent { background: var(--accent); color: #fff; }
+.accent:hover:not(:disabled) { background: var(--accent-hover); }
+
+.segmented { display: flex; padding: 3px; border-radius: 8px; background: var(--line); }
+.segmented button { height: 32px; background: transparent; color: var(--muted); }
+.segmented button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+.card { padding: 10px 12px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); }
+.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.tools { display: flex; gap: 6px; }
+
+.field { display: grid; grid-template-columns: 88px 1fr auto auto; align-items: center; gap: 8px; margin: 6px 0 0; }
+.field > input { grid-column: 2 / span 1; }
+label.field > input { grid-column: 2 / -1; }
+.caption { margin: 2px 0 0 96px; font-size: 11px; color: var(--muted); }
+.row .caption { margin: 0; }
+
+.advanced summary { cursor: pointer; color: var(--muted); padding: 2px 0; user-select: none; }
+.advanced[open] summary { margin-bottom: 6px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.inline { display: flex; align-items: center; gap: 8px; }
+.short { width: 110px; }
+.switch { margin-left: auto; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 14px; margin-top: 10px; }
+.grid label { display: grid; grid-template-columns: 1fr 90px; align-items: center; gap: 6px; }
+
+.actions { display: flex; gap: 8px; }
+.primary { flex: 1; height: 42px; background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; }
+.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.secondary { width: 120px; height: 42px; background: var(--line); color: var(--text); }
+kbd { margin-left: 8px; font-family: inherit; font-size: 12px; opacity: .75; }
+
+.log {
+  flex: 1;
+  min-height: 120px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--log);
+  font: 12px/1.5 Consolas, "D2Coding", Menlo, "Malgun Gothic", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log .warn { color: var(--warn); }
+.log .error { color: var(--error); }
+.log .info { color: var(--info); }
+
+.status { display: flex; gap: 16px; align-items: center; min-height: 20px; }
+.status .file { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#st-state.running { color: var(--info); }
+#st-state.failed { color: var(--error); }
+#st-state.check { color: var(--warn); }

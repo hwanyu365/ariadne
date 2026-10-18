@@ -6,12 +6,68 @@
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc",
+    "start": "tsc && electron .",
     "test": "tsc && electron dist/test-runner.js",
-    "verify": "python test_scrape.py && npm test"
+    "verify": "npm test",
+    "dist": "tsc && electron-builder --publish never"
   },
   "devDependencies": {
     "@types/node": "24.19.0",
     "electron": "44.5.1",
+    "electron-builder": "26.15.3",
     "typescript": "6.0.3"
+  },
+  "author": "hwanyu365",
+  "build": {
+    "directories": {
+      "output": "release"
+    },
+    "appId": "io.github.hwanyu365.ariadne",
+    "productName": "ariadne",
+    "artifactName": "ariadne-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "dist/**/*",
+      "!dist/**/*.test.js",
+      "!dist/test/**",
+      "!dist/test-runner.js",
+      "static/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/ariadne.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/ariadne.png",
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/ariadne.png",
+      "category": "Utility"
+    }
   }
 }
