@@ -50,7 +50,7 @@ export class Page {
         preload: opts.picker ? path.join(__dirname, '..', 'preload', 'picker.js') : undefined,
       },
     });
-    // 수집은 원래 탭만 읽는다 (docs/specification.md NFR#9).
+    // 수집은 원래 탭만 읽는다 → 새 창은 만들지 않는다.
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     // 수집에 권한·다운로드는 필요 없다 → 원격 페이지가 알림·위치·미디어를 얻거나 파일을 내려받지 못하게 한다.
     const ses = win.webContents.session;
@@ -202,6 +202,8 @@ export class Page {
     let at = await this.evalSoon<At>(measure);
     while (at && !at.ready && Date.now() < deadline) at = await this.evalSoon<At>(measure);
     if (!at) throw new Error(`셀렉터 ${JSON.stringify(selector)} 에 걸리는 요소가 없다.`);
+    // 덮은 요소를 누르면 엉뚱한 곳이 반응하고 원인이 가려진다 → 못 누른 사유로 돌려준다.
+    if (!at.ready) throw new Error(`${timeout}ms 동안 ${JSON.stringify(selector)} 위치가 멈추지 않았거나 다른 요소가 덮고 있다.`);
     for (const type of ['mousePressed', 'mouseReleased'])
       await this.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
   }

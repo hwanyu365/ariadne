@@ -93,13 +93,18 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
   })()`);
   if (!state) return `next 셀렉터 '${nextSel}' 에 걸리는 요소가 없다.`;
   if (state.clickable) {
-    await page.click(nextSel);
+    try {
+      await page.click(nextSel);
+    } catch (e) {
+      return `next 를 누르지 못했다: ${firstLine(e)}`;
+    }
     return null;
   }
   // 숨김·비활성이어도 href 가 살아 있으면 직접 이동한다.
   // 마지막이 아닌 페이지에서도 next 를 CSS 로만 죽여두는 사이트가 있어서, 여기서 포기하면 1페이지만 받고 끝난다.
   if (state.href && !state.href.startsWith('#') && !state.href.startsWith('javascript:')) {
-    const to = new URL(state.href, page.url());
+    const to = URL.parse(state.href, page.url());
+    if (!to) return `next 의 주소 ${state.href.slice(0, 80)} 를 해석할 수 없다.`;
     if (!reachable(to, page.url())) return `next 의 주소 ${to.href.slice(0, 80)} 는 따라가지 않는다.`;
     await page.goto(to.href, timeout);
     return null;

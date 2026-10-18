@@ -504,3 +504,24 @@ test('permissionsAndDownloadsDenied', async () => {
     await srv.close();
   }
 });
+
+test('stopsWithReasonWhenNextStaysCovered', async () => {
+  // next 를 계속 다른 요소가 덮고 있으면 덮은 요소를 누르지 않고 이유를 남기고 멈춘다.
+  const d = tempDir();
+  const logs: string[] = [];
+  write(path.join(d, 'v.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" href="v2.html">next</a>
+<div id=veil style="position:fixed;inset:0;background:rgba(0,0,0,.01)" onclick="document.title='veil'"></div></body>`);
+  const n = await scrape(pathToFileURL(path.join(d, 'v.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
+  assert.equal(n, 1);
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('덮고 있다')), logs.join('\n'));
+});
+
+test('stopsWithReasonOnBrokenNextHref', async () => {
+  // 숨겨진 next 의 href 를 해석할 수 없으면 예외로 끝내지 않고 이유를 남긴다.
+  const d = tempDir();
+  const logs: string[] = [];
+  write(path.join(d, 'h.html'), '<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" aria-disabled="true" href="https://[">n</a></body>');
+  const n = await scrape(pathToFileURL(path.join(d, 'h.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
+  assert.equal(n, 1);
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('해석할 수 없다')), logs.join('\n'));
+});
