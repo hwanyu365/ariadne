@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog
 
@@ -322,7 +323,10 @@ class App:
         if not d.is_dir():
             self._write(f"아직 폴더가 없다: {d}")
             return
-        os.startfile(d)
+        if hasattr(os, "startfile"):
+            os.startfile(d)
+        else:
+            webbrowser.open(d.as_uri())
 
     def _write(self, msg):
         got = progress(msg)
