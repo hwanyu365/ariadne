@@ -135,6 +135,18 @@ test('digitsAndStart', async () => {
   assert.deepEqual(names, ['p_065.txt', 'p_066.txt', 'p_067.txt']);
 });
 
+test('clickWaitsUntilNextReceivesIt', async () => {
+  // 로딩 막이 잠시 next 를 덮는 동안 누르면 막이 클릭을 받는다 → 그 자리에 next 가 드러날 때 누른다.
+  const { n } = await run(d => {
+    write(path.join(d, 'm1.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" href="m2.html">next</a>
+<div id=veil style="position:fixed;inset:0;background:rgba(0,0,0,.01)"></div>
+<script>setTimeout(() => veil.remove(), 600);</script></body>`);
+    write(path.join(d, 'm2.html'), '<meta charset="utf-8"><body><div id=c>본문 2</div><a class="next" aria-disabled="true">next</a></body>');
+    return pathToFileURL(path.join(d, 'm1.html')).href;
+  });
+  assert.equal(n, 2);
+});
+
 test('missingNextSelector', async () => {
   // next 셀렉터가 안 맞으면 1페이지만 받고 이유를 로그로 남긴다.
   const d = tempDir();

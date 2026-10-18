@@ -160,14 +160,26 @@ export class Page {
   }
 
   /** 신뢰된 마우스 이벤트로 누른다. JS click() 은 isTrusted 를 보는 사이트에서 무시된다. */
-  async click(selector: string): Promise<void> {
-    const at = await this.eval<{ x: number; y: number } | null>(`(() => {
+  async click(selector: string, timeout = 2000): Promise<void> {
+    // 이미지가 늦게 그려지면 레이아웃이 밀린다 → 위치가 두 프레임 연속 같고, 그 좌표에 실제로 이 요소가 있을 때만 누른다.
+    const measure = `new Promise(done => {
       const e = document.querySelector(${JSON.stringify(selector)});
-      if (!e) return null;
+      if (!e) return done(null);
       e.scrollIntoView({ block: 'center', inline: 'center' });
-      const r = e.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    })()`);
+      const rect = () => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
+      const a = rect();
+      // requestAnimationFrame 은 가려진 창에서 멈춘다 → 타이머로 잰다.
+      setTimeout(() => {
+        const b = rect();
+        const x = b[0] + b[2] / 2, y = b[1] + b[3] / 2;
+        const hit = document.elementFromPoint(x, y);
+        done({ x, y, ready: a.join() === b.join() && !!hit && (hit === e || e.contains(hit)) });
+      }, 50);
+    })`;
+    const deadline = Date.now() + timeout;
+    type At = { x: number; y: number; ready: boolean } | null;
+    let at = await this.evalSoon<At>(measure);
+    while (at && !at.ready && Date.now() < deadline) at = await this.evalSoon<At>(measure);
     if (!at) throw new Error(`셀렉터 ${JSON.stringify(selector)} 에 걸리는 요소가 없다.`);
     for (const type of ['mousePressed', 'mouseReleased'])
       await this.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
