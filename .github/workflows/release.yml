@@ -3,12 +3,14 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # 태그 전에 exe 빌드만 확인한다. Release 는 만들지 않고 산출물을 artifact 로 남긴다.
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -19,6 +21,25 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: |
           python test_scrape.py
-      - env:
+
+  # Chromium 은 싣지 않는다 → 실행 환경의 Edge 로 뜬다.
+  # exe 를 만든 뒤에 Release 를 만든다 → 빌드가 실패하면 exe 없는 Release 가 남지 않는다.
+  release:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt pyinstaller==6.22.3
+      - run: python -m PyInstaller --noconfirm --onefile --windowed --name ariadne --icon assets/ariadne.ico --add-data "assets/ariadne.ico;assets" --collect-data customtkinter gui.py
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ariadne-exe
+          path: dist/ariadne.exe
+      - if: github.event_name == 'push'
+        env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: gh release create "$env:GITHUB_REF_NAME" dist/ariadne.exe --generate-notes --verify-tag
