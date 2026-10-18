@@ -513,7 +513,7 @@ test('stopsWithReasonWhenNextStaysCovered', async () => {
 <div id=veil style="position:fixed;inset:0;background:rgba(0,0,0,.01)" onclick="document.title='veil'"></div></body>`);
   const n = await scrape(pathToFileURL(path.join(d, 'v.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
   assert.equal(n, 1);
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('덮고 있다')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('div#veil')), logs.join('\n'));
 });
 
 test('stopsWithReasonOnBrokenNextHref', async () => {

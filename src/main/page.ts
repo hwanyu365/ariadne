@@ -182,7 +182,7 @@ export class Page {
 
   /** 신뢰된 마우스 이벤트로 누른다. JS click() 은 isTrusted 를 보는 사이트에서 무시된다. */
   async click(selector: string, timeout = 2000): Promise<void> {
-    // 이미지가 늦게 그려지면 레이아웃이 밀린다 → 위치가 두 프레임 연속 같고, 그 좌표에 실제로 이 요소가 있을 때만 누른다.
+    // 이미지가 늦게 그려지면 레이아웃이 밀린다 → 위치가 50ms 간격으로 같고, 그 좌표에 실제로 이 요소가 있을 때만 누른다.
     const measure = `new Promise(done => {
       const e = document.querySelector(${JSON.stringify(selector)});
       if (!e) return done(null);
@@ -194,16 +194,19 @@ export class Page {
         const b = rect();
         const x = b[0] + b[2] / 2, y = b[1] + b[3] / 2;
         const hit = document.elementFromPoint(x, y);
-        done({ x, y, ready: a.join() === b.join() && !!hit && (hit === e || e.contains(hit)) });
+        const moving = a.join() !== b.join();
+        const covered = !hit || !(hit === e || e.contains(hit));
+        const what = hit ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') : '화면 밖';
+        done({ x, y, ready: !moving && !covered, why: moving ? '위치가 멈추지 않았다' : covered ? '그 자리에 ' + what + ' 이(가) 있다' : '' });
       }, 50);
     })`;
     const deadline = Date.now() + timeout;
-    type At = { x: number; y: number; ready: boolean } | null;
+    type At = { x: number; y: number; ready: boolean; why: string } | null;
     let at = await this.evalSoon<At>(measure);
     while (at && !at.ready && Date.now() < deadline) at = await this.evalSoon<At>(measure);
     if (!at) throw new Error(`셀렉터 ${JSON.stringify(selector)} 에 걸리는 요소가 없다.`);
     // 덮은 요소를 누르면 엉뚱한 곳이 반응하고 원인이 가려진다 → 못 누른 사유로 돌려준다.
-    if (!at.ready) throw new Error(`${timeout}ms 동안 ${JSON.stringify(selector)} 위치가 멈추지 않았거나 다른 요소가 덮고 있다.`);
+    if (!at.ready) throw new Error(`${timeout}ms 동안 ${JSON.stringify(selector)} 를 누를 수 없었다: ${at.why}.`);
     for (const type of ['mousePressed', 'mouseReleased'])
       await this.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
   }
