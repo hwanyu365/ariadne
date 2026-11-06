@@ -69,7 +69,7 @@ test('windowRejectsBadInputBeforeStart', async () => {
     await fill(win, { url: '', sel: '', next: '' });
     await win.webContents.executeJavaScript(`document.querySelector('#run').click()`);
     const log = await until<string>(win, `document.querySelector('#log').textContent`, v => v.length > 0, 3000);
-    assert.match(log, /URL 을 입력하라/);
+    assert.match(log, /URL 을 입력해 주세요/);
     assert.match(await win.webContents.executeJavaScript(`document.querySelector('#log .error') ? 'error' : ''`), /error/);
   } finally {
     win.destroy();
@@ -170,6 +170,76 @@ test('mainWindowStaysOnItsOwnPage', async () => {
     await sleep(800);
     assert.equal(BrowserWindow.getAllWindows().length, before, '새 창이 열렸다');
     assert.match(win.webContents.getURL(), /static\/index\.html$/, '다른 문서로 이동했다');
+  } finally {
+    win.destroy();
+  }
+});
+
+const js = <T = unknown>(win: BrowserWindow, code: string) => win.webContents.executeJavaScript(code) as Promise<T>;
+
+test('windowMarksInvalidField', async () => {
+  // 입력 오류는 해당 입력란에 표시되고 포커스가 그 칸으로 간다. 접힌 고급 옵션은 펼친다.
+  const win = await open();
+  try {
+    await fill(win, { url: 'http://x', sel: '#c', next: '.n', timeout: 'abc' });
+    await js(win, `document.querySelector('.advanced').open = false; document.querySelector('#run').click()`);
+    await until<string>(win, `document.querySelector('#log').textContent`, v => v.length > 0, 3000);
+    const got = await js(win, `[document.querySelector('[name="timeout"]').getAttribute('aria-invalid'), document.activeElement?.getAttribute('name'), document.querySelector('.advanced').open]`);
+    assert.deepEqual(got, ['true', 'timeout', true]);
+    await fill(win, { timeout: '1000' });
+    assert.equal(await js(win, `document.querySelector('[name="timeout"]').getAttribute('aria-invalid')`), null);
+  } finally {
+    win.destroy();
+  }
+});
+
+test('windowGuidesBeforeFirstRun', async () => {
+  // 실행 전에는 빈 로그 자리에 안내가 보이고, 실행하면 사라진다.
+  const d = tempDir();
+  const win = await open();
+  try {
+    assert.equal(await js(win, `document.querySelector('#guide').hidden`), false);
+    await fill(win, { url: fixture(d), sel: '#c', next: '.next', prefix: path.join(d, 'out', 'p') });
+    await js(win, `document.querySelector('#run').click()`);
+    assert.equal(await js(win, `document.querySelector('#guide').hidden`), true);
+    await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v));
+  } finally {
+    win.destroy();
+  }
+});
+
+test('windowSummarizesResult', async () => {
+  // 끝나면 결과·페이지 수·멈춘 사유를 요약하고, 받은 파일이 있으면 폴더 열기를 둔다. 수집 중에는 진행 막대가 보인다.
+  const d = tempDir();
+  const win = await open();
+  try {
+    await fill(win, { url: fixture(d), sel: '#c', next: '.next', prefix: path.join(d, 'out', 'p'), max: '0' });
+    const during = await js(win, `document.querySelector('#run').click(); [document.querySelector('#progress').hidden, document.querySelector('#result').hidden]`);
+    assert.deepEqual(during, [false, true]);
+    await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v));
+    const got = await js<[boolean, boolean, string, string, boolean]>(win, `[document.querySelector('#progress').hidden, document.querySelector('#result').hidden,
+      document.querySelector('#result').className, document.querySelector('#result-text').textContent, document.querySelector('#result-open').hidden]`);
+    assert.equal(got[0], true);
+    assert.equal(got[1], false);
+    assert.match(got[2], /ok/);
+    assert.match(got[3], /완료.*3페이지/);
+    assert.match(got[3], /마지막 페이지/);
+    assert.equal(got[4], false);
+  } finally {
+    win.destroy();
+  }
+});
+
+test('windowProgressUsesMaxPages', async () => {
+  // 최대 페이지가 있으면 받은 비율을 보인다.
+  const d = tempDir();
+  const win = await open();
+  try {
+    await fill(win, { url: fixture(d), sel: '#c', next: '.next', prefix: path.join(d, 'out', 'p'), max: '2' });
+    assert.equal(await js(win, `document.querySelector('#run').click(); document.querySelector('#progress').max`), 2);
+    const value = await until<number>(win, `document.querySelector('#progress').value`, v => v >= 1);
+    assert.ok(value >= 1, String(value));
+    await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v));
   } finally {
     win.destroy();
   }

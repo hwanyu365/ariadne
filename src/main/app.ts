@@ -2,7 +2,7 @@ import { BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pick, probe, scrape } from './engine';
-import { cleanSettings, DEFAULTS, HINT, loadSettings, logLevel, parseInputs, pickUpdate, progress, saveSettings, windowHeight, type Raw } from './form';
+import { cleanSettings, DEFAULTS, HINT, InputError, loadSettings, logLevel, parseInputs, pickUpdate, progress, saveSettings, windowHeight, type Raw } from './form';
 
 export type Kind = 'scrape' | 'probe' | 'pick';
 export interface StartRequest { kind: Kind; values: Raw; mode: 'text' | 'image'; headful: boolean }
@@ -36,19 +36,19 @@ export function registerIpc(opts: { settingsPath: string; defaultPrefix: string 
 
   ipcMain.handle('folder:open', async (_e, prefix: string) => {
     const dir = path.dirname(path.resolve(prefix.trim() || opts.defaultPrefix));
-    if (!fs.existsSync(dir)) return `아직 폴더가 없다: ${dir}`;
+    if (!fs.existsSync(dir)) return `아직 폴더가 없습니다: ${dir}`;
     return (await shell.openPath(dir)) || null;
   });
 
   ipcMain.on('run:stop', () => running?.abort());
 
   ipcMain.handle('run:start', (e, req: StartRequest) => {
-    if (running) return { error: '이미 실행 중이다.' };
+    if (running) return { error: '이미 실행 중입니다.', field: null };
     let args: ReturnType<typeof parseInputs>;
     try {
       args = parseInputs(req.values, req.kind !== 'scrape');
     } catch (err) {
-      return { error: firstLine(err) };
+      return { error: firstLine(err), field: err instanceof InputError ? err.field : null };
     }
     const wc = e.sender;
     const send = (channel: string, data?: unknown) => { if (!wc.isDestroyed()) wc.send(channel, data); };
@@ -61,7 +61,7 @@ export function registerIpc(opts: { settingsPath: string; defaultPrefix: string 
       running = null;
       send('run:done', { stopped: ctl.signal.aborted });
     });
-    return { error: null };
+    return { error: null, field: null };
   });
 }
 
@@ -75,7 +75,7 @@ async function run(req: StartRequest, { text, nums }: ReturnType<typeof parseInp
       });
       log(`완료: ${n}개 페이지`);
     } else if (req.kind === 'probe') {
-      log('probe 중... 브라우저 창을 띄웠으면 확인한 뒤 [중지] 를 누르면 닫힌다.');
+      log('probe 중... 브라우저 창을 띄웠으면 확인한 뒤 [중지] 를 누르면 닫힙니다.');
       await probe(text.url, text.sel || null, text.next || null, {
         timeout: nums.timeout, headful: req.headful, titleSel: text.title || null, delay: nums.delay, onLog: log, charset: text.charset,
         pause: () => new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true })),
