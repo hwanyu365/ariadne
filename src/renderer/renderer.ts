@@ -186,10 +186,7 @@ interface Api {
     if (err) write(err, 'warn');
   };
   result.open.addEventListener('click', openFolder);
-  $('#open-dir').addEventListener('click', async () => {
-    const err = await api.openFolder($<HTMLInputElement>('[name="prefix"]').value);
-    if (err) write(err, 'warn');
-  });
+  $('#open-dir').addEventListener('click', openFolder);
   document.addEventListener('keydown', e => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();

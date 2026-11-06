@@ -244,3 +244,19 @@ test('windowProgressUsesMaxPages', async () => {
     win.destroy();
   }
 });
+
+test('windowLogKeepsRecentLinesAndMarksLevels', async () => {
+  // 화면의 로그는 최근 2000줄만 두고, 경고·실패·완료 줄은 색 외에 줄 앞 표시로도 구분한다.
+  const win = await open();
+  try {
+    for (let i = 1; i <= 2005; i++) win.webContents.send('run:log', { text: `줄 ${i}`, level: null, progress: null });
+    for (const level of ['warn', 'error', 'ok']) win.webContents.send('run:log', { text: level, level, progress: null });
+    await until<boolean>(win, `!!document.querySelector('#log .ok')`, v => v, 5000);
+    assert.equal(await js(win, `document.querySelector('#log').childElementCount`), 2000);
+    assert.equal(await js(win, `document.querySelector('#log').firstElementChild.textContent`), '줄 9');
+    const marks = await js<string[]>(win, `['warn', 'error', 'ok'].map(l => getComputedStyle(document.querySelector('#log .' + l), '::before').content)`);
+    assert.deepEqual(marks, ['"! "', '"× "', '"✓ "']);
+  } finally {
+    win.destroy();
+  }
+});
