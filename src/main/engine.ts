@@ -20,6 +20,10 @@ export interface ScrapeOptions {
   signal?: AbortSignal;
   charset?: string | null;
   cdp?: PageOptions['cdp'];
+  /** 텍스트 모드에서 본문 안에서 뺄 요소. */
+  exclude?: string | null;
+  /** 텍스트 모드에서 받은 본문 전체를 {접두사}_all.txt 로도 남긴다. */
+  merge?: boolean;
 }
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.bmp'];
@@ -38,8 +42,19 @@ const q = JSON.stringify;
 const firstLine = (e: unknown) => String(e instanceof Error ? e.message : e).split('\n')[0];
 
 /** selector 에 걸리는 모든 요소의 보이는 텍스트를 합쳐서 돌려준다. */
-async function readText(page: Page, selector: string, timeout: number): Promise<string> {
+async function readText(page: Page, selector: string, timeout: number, exclude: string | null = null): Promise<string> {
   await page.waitFor(selector, timeout);
+  // 제외 요소를 숨긴 채 innerText 로 읽어야 화면에 보이는 줄바꿈이 남는다. 문서가 바뀌면 다시 넣는다.
+  if (exclude) await page.eval(`(() => {
+    document.querySelectorAll(${q(exclude)});
+    let st = document.getElementById('ariadne-exclude');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = 'ariadne-exclude';
+      (document.head || document.documentElement).append(st);
+    }
+    st.textContent = ${q(`${exclude} { display: none !important; }`)};
+  })()`);
   return page.eval<string>(`[...document.querySelectorAll(${q(selector)})].map(e => e.innerText.trim()).join('\\n').trim()`);
 }
 
@@ -211,14 +226,15 @@ async function saveText(page: Page, text: string, prefix: string, num: number, d
   }
   const out = `${prefix}_${pad(num, digits)}.txt`;
   fs.writeFileSync(out, body, 'utf8');
-  return { size: [...body].length, name: path.basename(out) };
+  return { size: [...body].length, name: path.basename(out), body };
 }
 
 export async function scrape(url: string, sel: string, nextSel: string, prefix: string, o: ScrapeOptions = {}): Promise<number> {
   const { maxPages = 0, timeout = 15000, delay = 0, digits = 4, start = 1, titleSel = null, charset = null } = o;
   const log = o.onLog ?? console.error;
   const images = o.mode === 'image';
-  const read = images ? readSrcs : readText;
+  const exclude = o.exclude?.trim() || null;
+  const read: typeof readText = images ? readSrcs : (p, s, t) => readText(p, s, t, exclude);
   const base = prefix;
   fs.mkdirSync(path.dirname(base), { recursive: true });
   const first = `${path.basename(base)}_${pad(start, digits)}`;
@@ -226,6 +242,11 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
   const lower = first.toLowerCase();
   const clash = fs.readdirSync(path.dirname(base)).find(f => images ? f.toLowerCase().startsWith(`${lower}_`) : f.toLowerCase() === `${lower}.txt`);
   if (clash) log(`경고: 이미 같은 이름의 파일이 있어 덮어쓰거나 섞일 수 있습니다: ${clash}`);
+  const all = o.merge && !images ? `${base}_all.txt` : null;
+  if (all) {
+    if (fs.existsSync(all)) log(`경고: 이미 있는 파일을 새로 씁니다: ${path.basename(all)}`);
+    fs.writeFileSync(all, '', 'utf8');
+  }
   let pages = 0;
   let last = '';
   // 장편은 본문 전체를 쌓으면 메모리가 커진다 → 해시만 남긴다.
@@ -249,7 +270,8 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         const n = await saveImages(page, current.split('\n').filter(Boolean), base, num, digits, log, timeout, o.signal);
         log(`[${pages}] 이미지 ${n}장 -> ${path.basename(base)}_${pad(num, digits)}_*`);
       } else {
-        const { size, name } = await saveText(page, current, base, num, digits, titleSel, log);
+        const { size, name, body } = await saveText(page, current, base, num, digits, titleSel, log);
+        if (all) fs.appendFileSync(all, pages > 1 ? `\n\n${body}` : body, 'utf8');
         log(`[${pages}] ${size}자 -> ${name}`);
         if (!warned) {
           // 페이지마다 선언이 다를 수 있어 매번 보되, 같은 경고로 로그를 덮지 않게 한 번만 낸다.
