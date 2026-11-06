@@ -643,7 +643,7 @@ test('imageModeChecksResponseIsImage', async () => {
   const blocked: Handler = (req, res, dir) => {
     if ((req.url ?? '').endsWith('blocked.png')) { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>hotlink</html>'); }
     else if ((req.url ?? '').endsWith('bm.png')) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('BM 이미지 차단'); }
-    else if ((req.url ?? '').endsWith('typed.png')) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(' <html>hotlink</html>'); }
+    else if ((req.url ?? '').endsWith('typed.png')) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(Buffer.from('﻿ <html>hotlink</html>')); }
     else files(req, res, dir);
   };
   const logs: string[] = [];

@@ -160,7 +160,7 @@ function imageExt(url: string, contentType: string | null, body: Buffer): string
   const mime = (contentType ?? '').split(';')[0].trim().toLowerCase();
   const ext = path.extname(new URL(url).pathname).toLowerCase();
   // 차단 페이지를 image/* 로 내려주는 CDN 도 있다 → 마크업으로 시작하면 SVG 만 이미지로 본다.
-  if (/^\s*</.test(body.subarray(0, 64).toString('latin1')) && mime !== 'image/svg+xml') return null;
+  if (/^(\xef\xbb\xbf)?\s*</.test(body.subarray(0, 64).toString('latin1')) && mime !== 'image/svg+xml') return null;
   if (mime.startsWith('image/')) return IMAGE_EXTS.includes(ext) ? ext : MIME_EXTS[mime] ?? '.bin';
   // 핫링크 차단은 200 과 HTML 로 답한다 → 형식을 밝히지 않은 응답만 주소의 확장자를 믿는다.
   const untyped = !mime || mime === 'application/octet-stream' || mime === 'binary/octet-stream';
