@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { tempDir } from '../test/serve';
-import { DEFAULTS, loadSettings, logLevel, parseInputs, pickUpdate, progress, saveSettings, windowHeight, type Raw } from './form';
+import { DEFAULTS, InputError, loadSettings, logLevel, parseInputs, pickUpdate, progress, saveSettings, windowHeight, type Raw } from './form';
 
 const raw = (over: Partial<Raw> = {}): Raw => ({ ...DEFAULTS, url: 'http://x', sel: '#c', next: '.next', ...over });
 
@@ -17,7 +17,7 @@ function reason(r: Raw, probe: boolean): string | null {
 }
 
 test('emptyUrlRejected', () => {
-  for (const probe of [true, false]) assert.equal(reason(raw({ url: '  ' }), probe), 'URL 을 입력하라.');
+  for (const probe of [true, false]) assert.equal(reason(raw({ url: '  ' }), probe), 'URL 을 입력해 주세요.');
 });
 
 test('selectorsRequiredOnlyForRun', () => {
@@ -29,7 +29,7 @@ test('selectorsRequiredOnlyForRun', () => {
 
 test('nonNumericRejected', () => {
   for (const key of ['max', 'start', 'digits', 'timeout', 'delay'] as const)
-    for (const probe of [true, false]) assert.match(reason(raw({ [key]: 'abc' }), probe) ?? '', /숫자여야 한다: 'abc'/, key);
+    for (const probe of [true, false]) assert.match(reason(raw({ [key]: 'abc' }), probe) ?? '', /숫자여야 합니다: 'abc'/, key);
 });
 
 test('charsetChecked', () => {
@@ -107,4 +107,25 @@ test('windowFitsScreen', () => {
   // 작업 영역(작업 표시줄 제외)보다 큰 창은 아래가 잘린다.
   assert.equal(windowHeight(1040), 900);
   for (const area of [720, 600, 1000.5]) assert.ok(windowHeight(area) <= area - 40, String(area));
+});
+
+test('inputErrorNamesField', () => {
+  // 화면이 오류를 해당 입력란에 표시하도록 어느 칸인지 함께 올린다.
+  const field = (r: Raw, probe: boolean) => {
+    try {
+      parseInputs(r, probe);
+      return null;
+    } catch (e) {
+      return e instanceof InputError ? e.field : 'not InputError';
+    }
+  };
+  assert.equal(field(raw({ url: '' }), true), 'url');
+  assert.equal(field(raw({ sel: '' }), false), 'sel');
+  assert.equal(field(raw({ next: '' }), false), 'next');
+  assert.equal(field(raw({ timeout: 'x' }), true), 'timeout');
+  assert.equal(field(raw({ charset: 'nope' }), true), 'charset');
+});
+
+test('doneLineIsSuccess', () => {
+  assert.equal(logLevel('완료: 3개 페이지'), 'ok');
 });

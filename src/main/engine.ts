@@ -86,7 +86,7 @@ async function waitChange(page: Page, selector: string, old: string, timeout: nu
 
 /** 스크롤은 지연 이미지를 채우는 보조 단계다 → 끝나지 않는 페이지에서도 수집은 계속한다. */
 async function scrollFor(page: Page, log: Log) {
-  await scrollAll(page).catch(e => log(`  경고: 페이지 끝까지 스크롤하지 못했다 (${firstLine(e).slice(0, 60)})`));
+  await scrollAll(page).catch(e => log(`  경고: 페이지 끝까지 스크롤하지 못했습니다 (${firstLine(e).slice(0, 60)})`));
 }
 
 /** 주소는 원격 페이지가 정한다 → 웹 주소이거나 지금 페이지와 같은 스킴일 때만 따라간다. 원격 페이지가 로컬 파일을 가리키게 하지 않는다. */
@@ -114,7 +114,7 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
       blank: !!t && !['_self', '_parent', '_top'].includes(t),
     };
   })()`);
-  if (!state) return `next 셀렉터 '${nextSel}' 에 걸리는 요소가 없다.`;
+  if (!state) return `next 셀렉터 '${nextSel}' 에 걸리는 요소가 없습니다.`;
   let clickError = '';
   // 새 탭 링크는 눌러도 새 창이 거부돼 아무 일도 없다 → 주소로 넘어간다.
   if (state.clickable && !(state.blank && state.href)) {
@@ -122,7 +122,7 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
       await page.click(nextSel);
       return null;
     } catch (e) {
-      clickError = `next 를 누르지 못했다: ${firstLine(e)}`;
+      clickError = `next 를 누르지 못했습니다: ${firstLine(e)}`;
       if (!state.href) return clickError;
     }
   }
@@ -130,16 +130,16 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
   // 마지막이 아닌 페이지에서도 next 를 CSS 로만 죽여두는 사이트가 있어서, 여기서 포기하면 1페이지만 받고 끝난다.
   if (state.href) {
     const to = URL.parse(state.href, page.url());
-    if (!to) return `next 의 주소 ${state.href.slice(0, 80)} 를 해석할 수 없다.`;
-    if (!reachable(to, page.url())) return `next 의 주소 ${to.href.slice(0, 80)} 는 따라가지 않는다.`;
+    if (!to) return `next 의 주소 ${state.href.slice(0, 80)} 를 해석할 수 없습니다.`;
+    if (!reachable(to, page.url())) return `next 의 주소 ${to.href.slice(0, 80)} 는 따라가지 않습니다.`;
     try {
       await page.goto(to.href, timeout);
     } catch (e) {
-      return `${clickError ? `${clickError} ` : ''}next 의 주소로 이동하지 못했다: ${firstLine(e)}`;
+      return `${clickError ? `${clickError} ` : ''}next 의 주소로 이동하지 못했습니다: ${firstLine(e)}`;
     }
     return null;
   }
-  return clickError || 'next 요소는 있으나 숨김/비활성이고 href 도 없다. 마지막 페이지로 본다.';
+  return clickError || 'next 요소는 있으나 숨김/비활성이고 href 도 없습니다. 마지막 페이지로 봅니다.';
 }
 
 const MAGIC: [string, (b: Buffer) => boolean][] = [
@@ -206,7 +206,7 @@ async function saveText(page: Page, text: string, prefix: string, num: number, d
   if (titleSel) {
     // 제목을 본문에 싣지 않는 사이트가 있어, "{n}화. {제목}" 헤더를 직접 붙인다.
     const title = await readTitle(page, titleSel);
-    if (!title) log(`  경고: 제목 셀렉터 '${titleSel}' 에 걸리는 요소가 없다.`);
+    if (!title) log(`  경고: 제목 셀렉터 '${titleSel}' 에 걸리는 요소가 없습니다.`);
     body = `${title ? `${num}화. ${title}` : `${num}화.`}\n\n${text}`;
   }
   const out = `${prefix}_${pad(num, digits)}.txt`;
@@ -225,7 +225,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
   // Windows·macOS 파일시스템은 대소문자를 가리지 않는다.
   const lower = first.toLowerCase();
   const clash = fs.readdirSync(path.dirname(base)).find(f => images ? f.toLowerCase().startsWith(`${lower}_`) : f.toLowerCase() === `${lower}.txt`);
-  if (clash) log(`경고: 이미 같은 이름의 파일이 있어 덮어쓰거나 섞일 수 있다: ${clash}`);
+  if (clash) log(`경고: 이미 같은 이름의 파일이 있어 덮어쓰거나 섞일 수 있습니다: ${clash}`);
   let pages = 0;
   let last = '';
   // 장편은 본문 전체를 쌓으면 메모리가 커진다 → 해시만 남긴다.
@@ -272,7 +272,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
       const docs = page.documents();
       const why = await gotoNext(page, nextSel, timeout);
       if (why) {
-        log(`  중단: ${why}${pages === 1 ? ' 셀렉터를 probe 로 확인하라.' : ''}`);
+        log(`  중단: ${why}${pages === 1 ? ' 셀렉터를 probe 로 확인하세요.' : ''}`);
         break;
       }
       let next = await waitChange(page, sel, current, timeout, read, o.signal);
@@ -284,8 +284,8 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         // 문서가 그대로인 SPA 는 지난 문서의 상태를 들고 있다 → 새 문서를 받았을 때만 상태를 본다.
         const status = page.documents() !== docs ? page.status() : 0;
         log(status >= 400
-          ? `  중단: next 로 넘어간 페이지가 HTTP ${status} 로 응답했다.`
-          : `  중단: next 클릭 후 ${timeout}ms 동안 수집 대상이 바뀌지 않았다. 마지막 페이지거나, 로딩이 느리면 타임아웃을 늘려야 한다.`);
+          ? `  중단: next 로 넘어간 페이지가 HTTP ${status} 로 응답했습니다.`
+          : `  중단: next 클릭 후 ${timeout}ms 동안 수집 대상이 바뀌지 않았습니다. 마지막 페이지거나, 로딩이 느리면 타임아웃을 늘려 주세요.`);
         break;
       }
       if (images) {
@@ -294,7 +294,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         next = await read(page, sel, timeout);
       }
       if (seen.has(digest(`${page.url()}\n${next}`))) {
-        log('  중단: next 가 이미 받은 페이지로 돌아왔다. 마지막 페이지로 본다.');
+        log('  중단: next 가 이미 받은 페이지로 돌아왔습니다. 마지막 페이지로 봅니다.');
         break;
       }
       current = next;
@@ -348,22 +348,22 @@ export async function probe(url: string, sel: string | null, nextSel: string | n
 
     const frames = page.childFrames();
     if (frames.length) {
-      log(`\n주의: iframe ${frames.length}개. 본문이 그 안에 있으면 수집할 수 없다.`);
+      log(`\n주의: iframe ${frames.length}개. 본문이 그 안에 있으면 수집할 수 없습니다.`);
       frames.slice(0, 5).forEach(f => log(`    ${f.url.slice(0, 90)}`));
     }
 
     log('\n[next 버튼 후보]');
     for (const c of await page.eval<{ sel: string; text: string; href: string }[]>(`(${NEXT_CANDIDATES_JS})()`))
       log(`    ${c.sel.padEnd(40)} text='${c.text}' href='${c.href}'`);
-    log('\n[본문 후보 - 짧은 쪽이 본문일 확률이 높다]');
+    log('\n[본문 후보 - 짧은 쪽이 본문일 확률이 높습니다]');
     for (const c of await page.eval<{ sel: string; len: number }[]>(`(${TEXT_CANDIDATES_JS})()`))
       log(`    ${c.sel.padEnd(40)} ${c.len}자`);
-    log('\n[이미지 후보 - 큰 이미지가 많은 쪽이 본문일 확률이 높다]');
+    log('\n[이미지 후보 - 큰 이미지가 많은 쪽이 본문일 확률이 높습니다]');
     for (const c of await page.eval<{ sel: string; n: number; big: number }[]>(`(${IMAGE_CANDIDATES_JS})()`))
       log(`    ${c.sel.padEnd(40)} ${c.n}장 (300px 이상 ${c.big}장)`);
 
     if (o.headful && o.pause) {
-      log('\n창을 확인한 뒤 [중지] 를 누르면 닫힌다.');
+      log('\n창을 확인한 뒤 [중지] 를 누르면 닫힙니다.');
       await Promise.race([o.pause(), page.whenClosed()]);
     }
   } finally {
@@ -389,7 +389,7 @@ export async function pick(url: string, onPick: (payload: unknown) => void, o: P
   });
   try {
     await page.goto(url, o.timeout ?? 15000);
-    log("요소를 클릭하면 셀렉터 후보가 뜬다. 다 고르면 툴바의 '완료' 또는 [중지] 를 누른다.");
+    log("요소를 클릭하면 셀렉터 후보가 뜹니다. 다 고르면 툴바의 '완료' 또는 [중지] 를 누르세요.");
     while (!done && !o.signal?.aborted && !page.closed()) await sleep(200);
   } finally {
     page.close();
