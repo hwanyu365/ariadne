@@ -43,6 +43,7 @@ const firstLine = (e: unknown) => String(e instanceof Error ? e.message : e).spl
 
 // 숨긴 요소의 innerText 는 글자 전체를 돌려준다 → 대상까지 가리면 무엇을 받았는지 알 수 없다.
 const coverMessage = (exclude: string) => `제외 셀렉터 '${exclude}' 가 수집 대상까지 가립니다.`;
+class CoverError extends Error {}
 
 /**
  * 제외 요소를 숨겨 innerText 가 화면에 보이는 줄바꿈대로 나머지를 읽게 한다. 수집 대상까지 가리면 숨기지 않고 true 를 돌려준다.
@@ -60,7 +61,7 @@ function hideExcluded(page: Page, selector: string, exclude: string): Promise<bo
 /** selector 에 걸리는 모든 요소의 보이는 텍스트를 합쳐서 돌려준다. */
 async function readText(page: Page, selector: string, timeout: number, exclude: string | null = null): Promise<string> {
   await page.waitFor(selector, timeout);
-  if (exclude && await hideExcluded(page, selector, exclude)) throw new Error(coverMessage(exclude));
+  if (exclude && await hideExcluded(page, selector, exclude)) throw new CoverError(coverMessage(exclude));
   return page.eval<string>(`[...document.querySelectorAll(${q(selector)})].map(e => e.innerText.trim()).join('\\n').trim()`);
 }
 
@@ -96,7 +97,8 @@ async function waitChange(page: Page, selector: string, old: string, timeout: nu
   const deadline = Date.now() + timeout;
   let seen = '';
   while (Date.now() < deadline && !signal?.aborted) {
-    const cur = await read(page, selector, 1000).catch(() => '');
+    // 아직 안 그려진 페이지의 실패는 기다리면 풀린다. 제외가 대상을 가리는 것은 기다려도 풀리지 않는다.
+    const cur = await read(page, selector, 1000).catch(e => { if (e instanceof CoverError) throw e; return ''; });
     // 나눠 그려지는 본문은 첫 변화가 일부일 수 있다 → 잠시 뒤 다시 읽어 같을 때 확정한다.
     if (cur && cur !== old && cur === seen) return cur;
     seen = cur;
@@ -249,7 +251,9 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
   const clash = fs.readdirSync(path.dirname(base)).find(f => images ? f.toLowerCase().startsWith(`${lower}_`) : f.toLowerCase() === `${lower}.txt`);
   if (clash) log(`경고: 이미 같은 이름의 파일이 있어 덮어쓰거나 섞일 수 있습니다: ${clash}`);
   const all = o.merge && !images ? `${base}_all.txt` : null;
-  if (all) {
+  // 이어 받기(시작 번호 2 이상)는 앞서 합친 본문 뒤에 붙인다.
+  if (all && start > 1 && fs.existsSync(all)) log(`  이어 씁니다: ${path.basename(all)}`);
+  else if (all) {
     if (fs.existsSync(all)) log(`경고: 이미 있는 파일을 새로 씁니다: ${path.basename(all)}`);
     fs.writeFileSync(all, '', 'utf8');
   }
@@ -277,7 +281,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         log(`[${pages}] 이미지 ${n}장 -> ${path.basename(base)}_${pad(num, digits)}_*`);
       } else {
         const { size, name, body } = await saveText(page, current, base, num, digits, titleSel, log);
-        if (all) fs.appendFileSync(all, pages > 1 ? `\n\n${body}` : body, 'utf8');
+        if (all) fs.appendFileSync(all, fs.statSync(all).size ? `\n\n${body}` : body, 'utf8');
         log(`[${pages}] ${size}자 -> ${name}`);
         if (!warned) {
           // 페이지마다 선언이 다를 수 있어 매번 보되, 같은 경고로 로그를 덮지 않게 한 번만 낸다.

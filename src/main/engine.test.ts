@@ -851,3 +851,21 @@ test('probeAppliesExclude', async () => {
   await probe(url, '#c', null, { timeout: 5000, exclude: 'body', onLog: m => covered.push(m) });
   assert.ok(covered.some(l => l.includes('경고') && l.includes('제외')), covered.join('\n'));
 });
+
+test('mergeAppendsWhenResuming', async () => {
+  // 이어 받기(시작 번호 2 이상)는 앞서 합쳐 둔 본문을 지우지 않고 이어 쓴다.
+  const d = tempDir();
+  fixtureLink(d);
+  const prefix = path.join(d, 'out', 'p');
+  await scrape(pathToFileURL(path.join(d, 'p1.html')).href, '#c', '.next', prefix, { timeout: 3000, merge: true, maxPages: 1, ...quiet });
+  await scrape(pathToFileURL(path.join(d, 'p2.html')).href, '#c', '.next', prefix, { timeout: 3000, merge: true, start: 2, ...quiet });
+  assert.equal(read(d, 'p_all.txt'), '본문 1\n\n본문 2\n\n본문 3');
+});
+
+test('excludeCoveringTargetOnLaterPageFails', async () => {
+  // 다음 페이지에서 제외가 수집 대상을 가려도 타임아웃으로 감추지 않고 그 사유로 실패한다.
+  const d = tempDir();
+  write(path.join(d, 'c1.html'), pageHtml('본문 1', '<a class="next" href="c2.html">n</a>'));
+  write(path.join(d, 'c2.html'), `<meta charset="utf-8"><body><div class=ad><div id=c>본문 2</div></div></body>`);
+  await assert.rejects(scrape(pathToFileURL(path.join(d, 'c1.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 2000, exclude: '.ad', ...quiet }), /제외/);
+});
