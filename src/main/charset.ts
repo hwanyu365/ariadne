@@ -24,6 +24,6 @@ export function charsetWarning(actual: string, body: Buffer, charset: string | n
   } catch {
     return null;
   }
-  if (charset) return `  경고: 페이지는 utf-8 로 보이는데 지정한 인코딩 '${charset}' 로 받아 ${actual} 로 읽었다. 인코딩을 utf-8 로 지정하라.`;
-  return `  경고: 페이지는 utf-8 로 보이는데 브라우저가 ${actual} 로 읽었다. 글자가 깨졌으면 인코딩을 utf-8 로 지정해 다시 받아라.`;
+  if (charset) return `  경고: 페이지는 utf-8 로 보이는데 지정한 인코딩 '${charset}' 로 받아 ${actual} 로 읽었습니다. 인코딩을 utf-8 로 지정하세요.`;
+  return `  경고: 페이지는 utf-8 로 보이는데 브라우저가 ${actual} 로 읽었습니다. 글자가 깨졌으면 인코딩을 utf-8 로 지정해 다시 받으세요.`;
 }

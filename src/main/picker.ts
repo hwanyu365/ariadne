@@ -134,7 +134,7 @@ export const PICKER_JS = `function install(opts) {
 
   const drawList = (cands, text) => {
     list.textContent = '';
-    if (!cands.length) { list.textContent = '후보를 만들지 못했다.'; return; }
+    if (!cands.length) { list.textContent = '후보를 만들지 못했습니다.'; return; }
     const t = mk('div', {color: '#555', marginBottom: '2px'});
     t.textContent = text ? '"' + text.slice(0, 40) + '"' : '';
     list.appendChild(t);

@@ -23,21 +23,35 @@ export const DEFAULTS: Raw = {
 
 export const HINT: Record<Mode, string> = {
   text: '본문이 들어 있는 컨테이너 (예: #articleBody)',
-  image: '이미지 요소까지 지정한다 (예: #articleBody img)',
+  image: '이미지 요소까지 지정합니다 (예: #articleBody img)',
 };
+
+/** 화면이 오류를 해당 입력란에 표시하도록 어느 칸인지 함께 올린다. */
+export class InputError extends Error {
+  constructor(message: string, readonly field: string) {
+    super(message);
+  }
+}
 
 /** 입력 문자열을 엔진 인자로 바꾼다. 비면 사유를 Error 로 올려 로그에 띄운다. */
 export function parseInputs(raw: Raw, probe: boolean) {
   const t = Object.fromEntries(TEXT_KEYS.map(k => [k, (raw[k] ?? '').trim()])) as Record<TextKey, string>;
-  if (!t.url) throw new Error('URL 을 입력하라.');
-  if (!probe && !(t.sel && t.next)) throw new Error('수집 대상과 next 셀렉터가 필요하다. 모르면 probe 로 후보를 먼저 보라.');
+  if (!t.url) throw new InputError('URL 을 입력해 주세요.', 'url');
+  if (!probe && !(t.sel && t.next))
+    throw new InputError('수집 대상과 next 셀렉터가 필요합니다. 모르면 [요소 선택] 이나 probe 로 후보를 먼저 확인하세요.', t.sel ? 'next' : 'sel');
   const nums = {} as Record<NumKey, number>;
   for (const [key, label] of NUM_FIELDS) {
     const value = (raw[key] ?? '').trim() || '0';
-    if (!/^-?\d+$/.test(value)) throw new Error(`${label} 은 숫자여야 한다: '${value}'`);
+    if (!/^-?\d+$/.test(value)) throw new InputError(`${label} 은 숫자여야 합니다: '${value}'`, key);
     nums[key] = Number(value);
   }
-  return { text: { ...t, charset: checkCharset(t.charset) }, nums };
+  let charset: string | null;
+  try {
+    charset = checkCharset(t.charset);
+  } catch (e) {
+    throw new InputError(e instanceof Error ? e.message : String(e), 'charset');
+  }
+  return { text: { ...t, charset }, nums };
 }
 
 // 선택기 툴바의 대상 이름을 입력란에 잇는다. 이미지 모드는 같은 칸에 이미지 셀렉터를 받는다.
@@ -91,8 +105,9 @@ export function progress(line: string): { pages: number; file: string } | null {
   return m ? { pages: Number(m[1]), file: m[2] } : null;
 }
 
-export function logLevel(line: string): 'error' | 'warn' | 'info' | null {
+export function logLevel(line: string): 'error' | 'warn' | 'info' | 'ok' | null {
   const s = line.trimStart();
+  if (s.startsWith('완료')) return 'ok';
   if (s.startsWith('실패')) return 'error';
   if (/^(경고|주의|건너뜀)/.test(s)) return 'warn';
   if (s.startsWith('중단')) return 'info';

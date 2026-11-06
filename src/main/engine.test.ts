@@ -478,7 +478,7 @@ test('remotePageCannotPointAtLocalFiles', async () => {
   }
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
   assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('secret.png')), logs.join('\n'));
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('따라가지 않는다')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('따라가지 않습니다')), logs.join('\n'));
 });
 
 test('permissionsAndDownloadsDenied', async () => {
@@ -524,7 +524,7 @@ test('stopsWithReasonOnBrokenNextHref', async () => {
   write(path.join(d, 'h.html'), '<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" aria-disabled="true" href="https://[">n</a></body>');
   const n = await scrape(pathToFileURL(path.join(d, 'h.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
   assert.equal(n, 1);
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('해석할 수 없다')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('해석할 수 없습니다')), logs.join('\n'));
 });
 
 test('reachableAllowsWebAndSameSchemeOnly', () => {
@@ -551,7 +551,7 @@ test('stopsWithReasonWhenNextHrefUnreachable', async () => {
   write(path.join(d, 'u.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" aria-disabled="true" href="${closed.base}/x">n</a></body>`);
   const n = await scrape(pathToFileURL(path.join(d, 'u.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
   assert.equal(n, 1);
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('이동하지 못했다')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('이동하지 못했습니다')), logs.join('\n'));
 });
 
 test('imagePageWithoutAddressesSavesNothing', async () => {
@@ -752,7 +752,7 @@ test('coveredHashNextKeepsClickReason', async () => {
     return pathToFileURL(path.join(d, 'k.html')).href;
   });
   assert.equal(n, 1);
-  assert.match(log, /중단: next 를 누르지 못했다.*div#veil/);
+  assert.match(log, /중단: next 를 누르지 못했습니다.*div#veil/);
 });
 
 test('sameTextOnAnotherPageContinues', async () => {
