@@ -109,6 +109,8 @@ label.field > input { grid-column: 2 / -1; }
 .inline { display: flex; align-items: center; gap: 8px; }
 .short { width: 110px; }
 .switch { margin-left: auto; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.toggles { gap: 18px; margin-top: 10px; }
+.toggles .switch { margin-left: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 14px; margin-top: 10px; }
 .grid label { display: grid; grid-template-columns: 1fr 80px; align-items: center; gap: 6px; }
 
