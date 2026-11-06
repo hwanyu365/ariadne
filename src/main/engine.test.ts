@@ -655,6 +655,27 @@ test('imageModeChecksResponseIsImage', async () => {
   assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('bm.png')), logs.join('\n'));
 });
 
+test('imageModeKeepsUntypedImageByAddress', async () => {
+  // 저장소형 CDN 은 이미지를 octet-stream 으로 준다 → 내용으로 못 정해도 주소가 이미지면 받는다.
+  const d = tempDir();
+  const tiff = Buffer.concat([Buffer.from('49492a00', 'hex'), Buffer.from('fixture')]);
+  write(path.join(d, 'i.html'), '<body><div id=c><img src="s3.tif"><img src="s3.jpg"></div></body>');
+  const files = staticFile();
+  const untyped: Handler = (req, res, dir) => {
+    if ((req.url ?? '').endsWith('i.html')) return files(req, res, dir);
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+    res.end(tiff);
+  };
+  const srv = await serve(d, untyped);
+  const logs: string[] = [];
+  try {
+    await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_002.jpg'], logs.join('\n'));
+});
+
 test('imageModeReadsLazyAttributesOnce', async () => {
   // data-original 같은 지연 로딩 속성을 placeholder 보다 먼저 보고, 같은 주소는 한 번만 받는다.
   const d = tempDir();

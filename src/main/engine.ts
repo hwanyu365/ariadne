@@ -157,11 +157,12 @@ function imageExt(url: string, contentType: string | null, body: Buffer): string
   if (!body.length) return null;
   const sniffed = MAGIC.find(([, is]) => is(body))?.[0];
   if (sniffed) return sniffed;
-  // 핫링크 차단은 200 과 HTML 로 답한다 → 내용으로도 형식으로도 이미지가 아니면 받지 않는다.
-  if (!(contentType ?? '').trim().toLowerCase().startsWith('image/')) return null;
+  const mime = (contentType ?? '').split(';')[0].trim().toLowerCase();
   const ext = path.extname(new URL(url).pathname).toLowerCase();
-  if (IMAGE_EXTS.includes(ext)) return ext;
-  return MIME_EXTS[(contentType ?? '').split(';')[0].trim().toLowerCase()] ?? '.bin';
+  if (mime.startsWith('image/')) return IMAGE_EXTS.includes(ext) ? ext : MIME_EXTS[mime] ?? '.bin';
+  // 핫링크 차단은 200 과 HTML 로 답한다 → 형식을 밝히지 않은 응답만 주소의 확장자를 믿는다.
+  const untyped = !mime || mime === 'application/octet-stream' || mime === 'binary/octet-stream';
+  return untyped && IMAGE_EXTS.includes(ext) ? ext : null;
 }
 
 /** 한 페이지의 이미지를 받아 저장하고 저장한 장수를 돌려준다. */
