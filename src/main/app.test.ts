@@ -225,6 +225,8 @@ test('windowSummarizesResult', async () => {
     assert.match(got[3], /완료.*3페이지/);
     assert.match(got[3], /마지막 페이지/);
     assert.equal(got[4], false);
+    // 숨겨져 있다 나타나는 영역은 낭독되지 않을 수 있다 → 항상 렌더링된 알림 영역에 같은 문구를 넣는다.
+    assert.equal(await js(win, `document.querySelector('#announce').textContent`), got[3]);
   } finally {
     win.destroy();
   }

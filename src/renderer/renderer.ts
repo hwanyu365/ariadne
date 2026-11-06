@@ -73,6 +73,8 @@ interface Api {
     result.box.className = `result ${cls}`;
     result.open.hidden = !folder;
     result.box.hidden = false;
+    // 숨겨져 있다 나타난 영역은 낭독되지 않을 수 있다 → 항상 렌더링된 알림 영역으로 전한다.
+    $('#announce').textContent = text;
   }
 
   function markInvalid(field: string | null) {
