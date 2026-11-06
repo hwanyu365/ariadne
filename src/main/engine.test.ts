@@ -774,3 +774,13 @@ test('disabledNextInsideWrapperLinkStops', async () => {
   });
   assert.equal(n, 1, log);
 });
+
+test('linkRelNextFollowsHref', async () => {
+  // 화면에 그려지지 않는 <link rel=next> 도 주소가 있으면 그 주소로 넘어간다.
+  const { n, log } = await runLogged(d => {
+    for (let i = 1; i <= 2; i++)
+      write(path.join(d, `l${i}.html`), `<meta charset="utf-8">${i < 2 ? `<link class="next" rel="next" href="l${i + 1}.html">` : ''}<body><div id=c>본문 ${i}</div></body>`);
+    return pathToFileURL(path.join(d, 'l1.html')).href;
+  });
+  assert.equal(n, 2, log);
+});

@@ -105,7 +105,7 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
     const clickable = visible && !e.disabled && e.getAttribute('aria-disabled') !== 'true';
     // 셀렉터가 링크 안쪽 아이콘을 가리키는 사이트가 있다 → 감싼 링크의 주소를 쓴다.
     // 버튼을 감싼 링크는 카드 전체 링크일 수 있다 → 링크 자신이나 링크 안 장식 요소일 때만 그 주소를 쓴다.
-    const a = e.closest('button, input, select, textarea') ? null : e.closest('a[href]');
+    const a = e.hasAttribute('href') ? e : e.closest('button, input, select, textarea') ? null : e.closest('a[href]');
     const h = a?.getAttribute('href') || '';
     const t = (a?.target || '').toLowerCase();
     return {
