@@ -784,3 +784,88 @@ test('linkRelNextFollowsHref', async () => {
   });
   assert.equal(n, 2, log);
 });
+
+test('excludeSelectorDropsElementsFromText', async () => {
+  // 제외 요소는 보이지 않는 것으로 보고 읽는다 → 나머지 본문의 줄바꿈은 그대로다.
+  const { texts, log } = await runLogged(d => {
+    write(path.join(d, 'x1.html'), pageHtml('<p>본문 1</p><p class=ad>광고</p><p>끝 1</p>', '<a class="next" href="x2.html">n</a>'));
+    // 제외 요소만 바뀌는 페이지는 다른 페이지로 보지 않는다.
+    write(path.join(d, 'x2.html'), pageHtml('<p>본문 1</p><p class=ad>다른 광고</p><p>끝 1</p>', ''));
+    return pathToFileURL(path.join(d, 'x1.html')).href;
+  }, { exclude: '.ad' });
+  assert.deepEqual(texts, ['본문 1\n\n끝 1'], log);
+});
+
+test('excludeSelectorSyntaxErrorFails', async () => {
+  // 문법이 틀린 제외 셀렉터를 조용히 무시하면 광고가 섞인 채 성공으로 끝난다.
+  const d = tempDir();
+  await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: '.ad[', ...quiet }));
+});
+
+test('mergeWritesAllPagesToOneFile', async () => {
+  // 페이지별 txt 와 함께 받은 본문 전체를 한 파일로도 남긴다. 다시 받으면 새로 쓰고 경고한다.
+  const d = tempDir();
+  const url = fixtureLink(d);
+  const prefix = path.join(d, 'out', 'p');
+  await scrape(url, '#c', '.next', prefix, { timeout: 3000, merge: true, titleSel: '#tt', ...quiet });
+  assert.equal(read(d, 'p_all.txt'), ['1화. 제목 1\n\n본문 1', '2화. 제목 2\n\n본문 2', '3화. 제목 3\n\n본문 3'].join('\n\n'));
+  const logs: string[] = [];
+  await scrape(url, '#c', '.next', prefix, { timeout: 3000, merge: true, maxPages: 1, onLog: m => logs.push(m) });
+  assert.equal(read(d, 'p_all.txt'), '본문 1');
+  assert.ok(logs.some(l => l.startsWith('경고') && l.includes('p_all.txt')), logs.join('\n'));
+});
+
+test('excludeWorksUnderStrictCsp', async () => {
+  // 인라인 스타일을 막는 CSP 페이지에서도 제외가 적용된다.
+  const d = tempDir();
+  const handler: Handler = (_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "style-src 'self'" });
+    res.end(pageHtml('<p>본문</p><p class=ad>광고</p>', ''));
+  };
+  const srv = await serve(d, handler);
+  try {
+    await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: '.ad', ...quiet });
+  } finally {
+    await srv.close();
+  }
+  assert.equal(read(d, 'p_0001.txt'), '본문');
+});
+
+test('excludeCoveringTargetFails', async () => {
+  // 제외 셀렉터가 수집 대상이나 그 조상까지 가리면 무엇을 받았는지 알 수 없다 → 실패로 알린다.
+  const d = tempDir();
+  await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: 'body', ...quiet }), /제외/);
+});
+
+test('probeAppliesExclude', async () => {
+  // probe 도 수집과 같은 제외를 거쳐 미리보기를 보인다. 대상까지 가리면 알린다.
+  const d = tempDir();
+  write(path.join(d, 'p.html'), pageHtml('<p>본문</p><p class=ad>광고</p>', ''));
+  const url = pathToFileURL(path.join(d, 'p.html')).href;
+  const logs: string[] = [];
+  await probe(url, '#c', null, { timeout: 5000, exclude: '.ad', onLog: m => logs.push(m) });
+  const all = logs.join('\n');
+  assert.match(all, /제외 '\.ad' -> 1개 매치/);
+  assert.match(all, /'#c' -> 1개 매치\n\s+\[0\] '본문'/);
+  const covered: string[] = [];
+  await probe(url, '#c', null, { timeout: 5000, exclude: 'body', onLog: m => covered.push(m) });
+  assert.ok(covered.some(l => l.includes('경고') && l.includes('제외')), covered.join('\n'));
+});
+
+test('mergeAppendsWhenResuming', async () => {
+  // 이어 받기(시작 번호 2 이상)는 앞서 합쳐 둔 본문을 지우지 않고 이어 쓴다.
+  const d = tempDir();
+  fixtureLink(d);
+  const prefix = path.join(d, 'out', 'p');
+  await scrape(pathToFileURL(path.join(d, 'p1.html')).href, '#c', '.next', prefix, { timeout: 3000, merge: true, maxPages: 1, ...quiet });
+  await scrape(pathToFileURL(path.join(d, 'p2.html')).href, '#c', '.next', prefix, { timeout: 3000, merge: true, start: 2, ...quiet });
+  assert.equal(read(d, 'p_all.txt'), '본문 1\n\n본문 2\n\n본문 3');
+});
+
+test('excludeCoveringTargetOnLaterPageFails', async () => {
+  // 다음 페이지에서 제외가 수집 대상을 가려도 타임아웃으로 감추지 않고 그 사유로 실패한다.
+  const d = tempDir();
+  write(path.join(d, 'c1.html'), pageHtml('본문 1', '<a class="next" href="c2.html">n</a>'));
+  write(path.join(d, 'c2.html'), `<meta charset="utf-8"><body><div class=ad><div id=c>본문 2</div></div></body>`);
+  await assert.rejects(scrape(pathToFileURL(path.join(d, 'c1.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 2000, exclude: '.ad', ...quiet }), /제외/);
+});

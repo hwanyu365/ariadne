@@ -4,12 +4,14 @@ type Kind = 'scrape' | 'probe' | 'pick';
 type Level = 'error' | 'warn' | 'info' | 'ok' | null;
 
 interface Api {
-  init(): Promise<{ settings: Record<string, string | boolean>; hint: Record<Mode, string>; mac: boolean }>;
+  init(): Promise<{ settings: Record<string, unknown>; hint: Record<Mode, string>; mac: boolean }>;
   save(values: Record<string, string | boolean>): void;
-  start(req: { kind: Kind; values: Record<string, string>; mode: Mode; headful: boolean }): Promise<{ error: string | null; field: string | null }>;
+  start(req: { kind: Kind; values: Record<string, string>; mode: Mode; headful: boolean; merge: boolean }): Promise<{ error: string | null; field: string | null }>;
   stop(): void;
   pickFolder(): Promise<string | null>;
   openFolder(prefix: string): Promise<string | null>;
+  site(url: string): Promise<(Record<string, string> & { mode: Mode }) | null>;
+  recent(): Promise<string[]>;
   onLog(cb: (d: { text: string; level: Level; progress: { pages: number; file: string } | null }) => void): void;
   onPick(cb: (d: { key: string; sel: string }) => void): void;
   onDone(cb: (d: { stopped: boolean }) => void): void;
@@ -20,6 +22,8 @@ interface Api {
   const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
   const inputs = [...document.querySelectorAll<HTMLInputElement>('input[name]:not([type=checkbox])')];
   const headful = $<HTMLInputElement>('[name="headful"]');
+  const merge = $<HTMLInputElement>('[name="merge"]');
+  const url = $<HTMLInputElement>('[name="url"]');
   const log = $<HTMLPreElement>('#log');
   const st = { state: $('#st-state'), pages: $('#st-pages'), file: $('#st-file'), time: $('#st-time') };
   const bar = $<HTMLProgressElement>('#progress');
@@ -34,15 +38,19 @@ interface Api {
   const values = () => Object.fromEntries(inputs.map(i => [i.name, i.value]));
   const save = () => {
     clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => api.save({ ...values(), mode, headful: headful.checked }), 300);
+    saveTimer = window.setTimeout(() => api.save({ ...values(), mode, headful: headful.checked, merge: merge.checked }), 300);
   };
+
+  function fillRecent(urls: unknown[]) {
+    $('#recent').replaceChildren(...urls.filter((u): u is string => typeof u === 'string').map(u => Object.assign(document.createElement('option'), { value: u })));
+  }
 
   function setMode(m: Mode) {
     mode = m;
     document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
     $('#hint').textContent = hint[m];
-    // 제목 헤더는 텍스트 파일에만 붙는다.
-    $<HTMLInputElement>('[name="title"]').disabled = m === 'image';
+    // 제목 헤더·제외·합치기는 텍스트 파일에만 쓴다.
+    for (const name of ['title', 'exclude', 'merge']) $<HTMLInputElement>(`[name="${name}"]`).disabled = m === 'image';
   }
 
   function setState(text: string, cls = '') {
@@ -122,7 +130,7 @@ interface Api {
     st.file.textContent = '';
     setState(LABEL[k], 'running');
     setRunning(true);
-    const got = await api.start({ kind: k, values: values(), mode, headful: headful.checked });
+    const got = await api.start({ kind: k, values: values(), mode, headful: headful.checked, merge: merge.checked });
     if (got.error) {
       setRunning(false);
       bar.hidden = true;
@@ -155,6 +163,7 @@ interface Api {
 
   api.onDone(({ stopped }) => {
     setRunning(false);
+    if (kind === 'scrape') void api.recent().then(fillRecent);
     bar.hidden = true;
     const files = kind === 'scrape' && pages > 0;
     const got = kind === 'scrape' ? ` · ${pages}페이지` : '';
@@ -173,6 +182,20 @@ interface Api {
   document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(b => b.addEventListener('click', () => { setMode(b.dataset.mode as Mode); save(); }));
   inputs.forEach(i => i.addEventListener('input', () => { i.removeAttribute('aria-invalid'); save(); }));
   headful.addEventListener('change', save);
+  merge.addEventListener('change', save);
+  // 다른 사이트로 바꿀 때만 채운다 → 같은 사이트에서 고쳐 쓰던 셀렉터를 덮지 않는다.
+  let host = '';
+  const hostOf = (u: string) => URL.parse(u.trim())?.host ?? '';
+  url.addEventListener('change', async () => {
+    const next = hostOf(url.value);
+    if (!next || next === host) return;
+    host = next;
+    const site = await api.site(url.value);
+    if (!site || hostOf(url.value) !== next) return;
+    for (const i of inputs) if (Object.hasOwn(site, i.name) && i.name !== 'url') i.value = site[i.name];
+    setMode(site.mode === 'image' ? 'image' : 'text');
+    save();
+  });
   $('#run').addEventListener('click', () => start('scrape'));
   $('#probe').addEventListener('click', () => start('probe'));
   $('#pick').addEventListener('click', () => start('pick'));
@@ -202,6 +225,9 @@ interface Api {
     hint = init.hint;
     for (const i of inputs) i.value = String(init.settings[i.name] ?? '');
     headful.checked = init.settings.headful === true;
+    merge.checked = init.settings.merge === true;
+    host = hostOf(url.value);
+    fillRecent(Array.isArray(init.settings.recent) ? init.settings.recent : []);
     setMode(init.settings.mode === 'image' ? 'image' : 'text');
     if (init.mac) $('#run-key').textContent = '⌘↵';
     document.body.dataset.ready = '1';

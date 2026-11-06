@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import type { BrowserWindow } from 'electron';
-import { tempDir } from '../test/serve';
+import { serve, tempDir } from '../test/serve';
 import { createMainWindow, registerIpc } from './app';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -28,7 +28,8 @@ async function until<T>(win: BrowserWindow, code: string, ok: (v: T) => boolean,
 }
 
 const settingsFile = path.join(tempDir(), 'settings.json');
-registerIpc({ settingsPath: settingsFile, defaultPrefix: path.join(tempDir(), 'page') });
+const notices: { title: string; body: string }[] = [];
+registerIpc({ settingsPath: settingsFile, defaultPrefix: path.join(tempDir(), 'page'), notify: (title, body) => notices.push({ title, body }) });
 
 async function open(): Promise<BrowserWindow> {
   const win = createMainWindow({ show: false });
@@ -260,5 +261,56 @@ test('windowLogKeepsRecentLinesAndMarksLevels', async () => {
     assert.deepEqual(marks, ['"! "', '"× "', '"✓ "']);
   } finally {
     win.destroy();
+  }
+});
+
+test('windowNotifiesWhenRunEndsUnfocused', async () => {
+  // 창을 보고 있지 않을 때 수집이 끝나면 OS 알림으로 결과를 알린다. probe 는 알리지 않는다.
+  const d = tempDir();
+  const win = await open();
+  try {
+    notices.length = 0;
+    await fill(win, { url: fixture(d), sel: '#c', next: '.next', prefix: path.join(d, 'out', 'p'), max: '0' });
+    await js(win, `document.querySelector('#run').click()`);
+    await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v));
+    await until<boolean>(win, 'true', () => notices.length > 0, 2000);
+    assert.equal(notices.length, 1);
+    assert.match(notices[0].title, /완료/);
+    assert.match(notices[0].body, /3페이지/);
+    await js(win, `document.querySelector('#probe').click()`);
+    await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v));
+    await sleep(300);
+    assert.equal(notices.length, 1);
+  } finally {
+    win.destroy();
+  }
+});
+
+test('windowFillsSitePresetForAnotherHost', async () => {
+  // 수집을 시작한 호스트의 셀렉터를 기억했다가, URL 을 그 호스트로 바꾸면 채운다. 같은 호스트 안에서는 덮지 않는다.
+  const d = tempDir();
+  fixture(d);
+  const site = await serve(d);
+  const other = site.base.replace('127.0.0.1', 'localhost');
+  const win = await open();
+  const setUrl = (u: string) => js(win, `(() => { const e = document.querySelector('[name="url"]'); e.value = ${JSON.stringify(u)}; e.dispatchEvent(new Event('change')); })()`);
+  try {
+    await fill(win, { url: `${site.base}/p1.html`, sel: '#c', next: '.next', exclude: '.ad', prefix: path.join(d, 'out', 'p') });
+    await js(win, `document.querySelector('#run').click()`);
+    await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v));
+    await setUrl(`${other}/p1.html`);
+    await fill(win, { sel: '#other', next: '.other', exclude: '' });
+    await setUrl(`${site.base}/p2.html`);
+    const got = await until<string[]>(win, `['sel', 'next', 'exclude'].map(k => document.querySelector('[name="' + k + '"]').value)`, v => v[0] === '#c');
+    assert.deepEqual(got, ['#c', '.next', '.ad']);
+    await fill(win, { sel: '#edited' });
+    await setUrl(`${site.base}/p3.html`);
+    await sleep(300);
+    assert.equal(await js(win, `document.querySelector('[name="sel"]').value`), '#edited');
+    const recent = await js<string[]>(win, `[...document.querySelectorAll('#recent option')].map(o => o.value)`);
+    assert.equal(recent[0], `${site.base}/p1.html`);
+  } finally {
+    win.destroy();
+    await site.close();
   }
 });

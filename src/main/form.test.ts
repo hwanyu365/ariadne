@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { tempDir } from '../test/serve';
-import { DEFAULTS, InputError, loadSettings, logLevel, parseInputs, pickUpdate, progress, saveSettings, windowHeight, type Raw } from './form';
+import { DEFAULTS, InputError, loadSettings, logLevel, parseInputs, pickUpdate, progress, remember, saveSettings, siteFor, windowHeight, type Raw, type Settings } from './form';
 
 const raw = (over: Partial<Raw> = {}): Raw => ({ ...DEFAULTS, url: 'http://x', sel: '#c', next: '.next', ...over });
 
@@ -128,4 +128,49 @@ test('inputErrorNamesField', () => {
 
 test('doneLineIsSuccess', () => {
   assert.equal(logLevel('완료: 3개 페이지'), 'ok');
+});
+
+test('pickFillsExcludeField', () => {
+  assert.equal(pickUpdate({ target: '제외', sel: '.ad' })?.key, 'exclude');
+});
+
+test('rememberKeepsRecentUrlsAndSitePresets', () => {
+  // 수집을 시작한 URL 은 최근 10개, 셀렉터 묶음은 호스트별로 남긴다.
+  let s: Settings = {};
+  for (let i = 1; i <= 12; i++) s = { ...s, ...remember(s, raw({ url: `http://a.test/ep/${i}`, sel: `#c${i}`, exclude: '.ad' }), 'text') };
+  s = { ...s, ...remember(s, raw({ url: 'http://a.test/ep/3', sel: '#c3' }), 'image') };
+  assert.equal(s.recent?.length, 10);
+  assert.equal(s.recent?.[0], 'http://a.test/ep/3');
+  assert.equal(new Set(s.recent).size, 10);
+  assert.deepEqual(siteFor(s, 'http://a.test/other'), { sel: '#c3', next: '.next', title: '', exclude: '', charset: '', mode: 'image' });
+  assert.equal(siteFor(s, 'http://b.test/'), null);
+  assert.equal(siteFor(s, 'not a url'), null);
+});
+
+test('siteListIsBounded', () => {
+  let s: Settings = {};
+  for (let i = 1; i <= 55; i++) s = { ...s, ...remember(s, raw({ url: `http://h${i}.test/` }), 'text') };
+  assert.equal(Object.keys(s.sites ?? {}).length, 50);
+  assert.equal(siteFor(s, 'http://h1.test/'), null);
+  assert.notEqual(siteFor(s, 'http://h55.test/'), null);
+});
+
+test('settingsKeepOnlyValidSitesAndRecent', () => {
+  // 사이트 설정도 파일에서 읽은 값이다 → 형태가 맞는 것만 살리고, 호스트 이름이 객체의 내부 키와 겹쳐도 안전하다.
+  const file = path.join(tempDir(), 'settings.json');
+  fs.writeFileSync(file, JSON.stringify({
+    merge: true,
+    recent: ['http://a', 3, null, 'http://b'],
+    sites: { 'a.test': { sel: '#c', next: 1, mode: 'video', extra: 'x' }, bad: 'x', __proto__: { sel: '#p' } },
+  }));
+  const got = loadSettings(file);
+  assert.equal(got.merge, true);
+  assert.deepEqual(got.recent, ['http://a', 'http://b']);
+  assert.deepEqual(got.sites?.['a.test'], { sel: '#c', next: '', title: '', exclude: '', charset: '', mode: 'text' });
+  assert.equal(Object.hasOwn(got.sites ?? {}, 'bad'), false);
+  assert.equal(({} as Record<string, unknown>).sel, undefined);
+  fs.writeFileSync(file, '{"sites": {"__proto__": {"sel": "#p"}}}');
+  const sites = loadSettings(file).sites ?? {};
+  assert.equal(Object.getPrototypeOf(sites), Object.prototype);
+  assert.equal(({} as Record<string, unknown>).sel, undefined);
 });

@@ -20,6 +20,10 @@ export interface ScrapeOptions {
   signal?: AbortSignal;
   charset?: string | null;
   cdp?: PageOptions['cdp'];
+  /** 텍스트 모드에서 본문 안에서 뺄 요소. */
+  exclude?: string | null;
+  /** 텍스트 모드에서 받은 본문 전체를 {접두사}_all.txt 로도 남긴다. */
+  merge?: boolean;
 }
 
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.bmp'];
@@ -37,9 +41,27 @@ const pad = (n: number, digits: number) => String(n).padStart(digits, '0');
 const q = JSON.stringify;
 const firstLine = (e: unknown) => String(e instanceof Error ? e.message : e).split('\n')[0];
 
+// 숨긴 요소의 innerText 는 글자 전체를 돌려준다 → 대상까지 가리면 무엇을 받았는지 알 수 없다.
+const coverMessage = (exclude: string) => `제외 셀렉터 '${exclude}' 가 수집 대상까지 가립니다.`;
+class CoverError extends Error {}
+
+/**
+ * 제외 요소를 숨겨 innerText 가 화면에 보이는 줄바꿈대로 나머지를 읽게 한다. 수집 대상까지 가리면 숨기지 않고 true 를 돌려준다.
+ * 인라인 <style> 은 페이지 CSP 에 막힐 수 있다 → CSP 와 무관한 CSSOM 으로 요소마다 숨기고, 늦게 붙은 요소를 위해 읽을 때마다 다시 한다.
+ */
+function hideExcluded(page: Page, selector: string, exclude: string): Promise<boolean> {
+  return page.eval<boolean>(`(() => {
+    const ex = ${q(exclude)};
+    if ([...document.querySelectorAll(${q(selector)})].some(e => e.closest(ex))) return true;
+    document.querySelectorAll(ex).forEach(e => e.style.setProperty('display', 'none', 'important'));
+    return false;
+  })()`);
+}
+
 /** selector 에 걸리는 모든 요소의 보이는 텍스트를 합쳐서 돌려준다. */
-async function readText(page: Page, selector: string, timeout: number): Promise<string> {
+async function readText(page: Page, selector: string, timeout: number, exclude: string | null = null): Promise<string> {
   await page.waitFor(selector, timeout);
+  if (exclude && await hideExcluded(page, selector, exclude)) throw new CoverError(coverMessage(exclude));
   return page.eval<string>(`[...document.querySelectorAll(${q(selector)})].map(e => e.innerText.trim()).join('\\n').trim()`);
 }
 
@@ -75,7 +97,8 @@ async function waitChange(page: Page, selector: string, old: string, timeout: nu
   const deadline = Date.now() + timeout;
   let seen = '';
   while (Date.now() < deadline && !signal?.aborted) {
-    const cur = await read(page, selector, 1000).catch(() => '');
+    // 아직 안 그려진 페이지의 실패는 기다리면 풀린다. 제외가 대상을 가리는 것은 기다려도 풀리지 않는다.
+    const cur = await read(page, selector, 1000).catch(e => { if (e instanceof CoverError) throw e; return ''; });
     // 나눠 그려지는 본문은 첫 변화가 일부일 수 있다 → 잠시 뒤 다시 읽어 같을 때 확정한다.
     if (cur && cur !== old && cur === seen) return cur;
     seen = cur;
@@ -211,14 +234,15 @@ async function saveText(page: Page, text: string, prefix: string, num: number, d
   }
   const out = `${prefix}_${pad(num, digits)}.txt`;
   fs.writeFileSync(out, body, 'utf8');
-  return { size: [...body].length, name: path.basename(out) };
+  return { size: [...body].length, name: path.basename(out), body };
 }
 
 export async function scrape(url: string, sel: string, nextSel: string, prefix: string, o: ScrapeOptions = {}): Promise<number> {
   const { maxPages = 0, timeout = 15000, delay = 0, digits = 4, start = 1, titleSel = null, charset = null } = o;
   const log = o.onLog ?? console.error;
   const images = o.mode === 'image';
-  const read = images ? readSrcs : readText;
+  const exclude = o.exclude?.trim() || null;
+  const read: typeof readText = images ? readSrcs : (p, s, t) => readText(p, s, t, exclude);
   const base = prefix;
   fs.mkdirSync(path.dirname(base), { recursive: true });
   const first = `${path.basename(base)}_${pad(start, digits)}`;
@@ -226,6 +250,13 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
   const lower = first.toLowerCase();
   const clash = fs.readdirSync(path.dirname(base)).find(f => images ? f.toLowerCase().startsWith(`${lower}_`) : f.toLowerCase() === `${lower}.txt`);
   if (clash) log(`경고: 이미 같은 이름의 파일이 있어 덮어쓰거나 섞일 수 있습니다: ${clash}`);
+  const all = o.merge && !images ? `${base}_all.txt` : null;
+  // 이어 받기(시작 번호 2 이상)는 앞서 합친 본문 뒤에 붙인다.
+  if (all && start > 1 && fs.existsSync(all)) log(`  이어 씁니다: ${path.basename(all)}`);
+  else if (all) {
+    if (fs.existsSync(all)) log(`경고: 이미 있는 파일을 새로 씁니다: ${path.basename(all)}`);
+    fs.writeFileSync(all, '', 'utf8');
+  }
   let pages = 0;
   let last = '';
   // 장편은 본문 전체를 쌓으면 메모리가 커진다 → 해시만 남긴다.
@@ -249,7 +280,8 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         const n = await saveImages(page, current.split('\n').filter(Boolean), base, num, digits, log, timeout, o.signal);
         log(`[${pages}] 이미지 ${n}장 -> ${path.basename(base)}_${pad(num, digits)}_*`);
       } else {
-        const { size, name } = await saveText(page, current, base, num, digits, titleSel, log);
+        const { size, name, body } = await saveText(page, current, base, num, digits, titleSel, log);
+        if (all) fs.appendFileSync(all, fs.statSync(all).size ? `\n\n${body}` : body, 'utf8');
         log(`[${pages}] ${size}자 -> ${name}`);
         if (!warned) {
           // 페이지마다 선언이 다를 수 있어 매번 보되, 같은 경고로 로그를 덮지 않게 한 번만 낸다.
@@ -320,6 +352,7 @@ export interface ProbeOptions {
   /** 창을 띄웠을 때 사용자가 확인을 마칠 때까지 기다린다. */
   pause?: () => Promise<void>;
   charset?: string | null;
+  exclude?: string | null;
 }
 
 export async function probe(url: string, sel: string | null, nextSel: string | null, o: ProbeOptions = {}): Promise<void> {
@@ -336,7 +369,10 @@ export async function probe(url: string, sel: string | null, nextSel: string | n
     const warn = charsetWarning(actual, page.docBytes(), charset);
     if (warn) log(warn);
 
-    for (const [name, s] of [['수집 대상', sel], ['next', nextSel], ['제목', o.titleSel ?? null]] as const) {
+    // 미리보기가 수집 결과와 같아야 제외 셀렉터가 맞는지 판단할 수 있다.
+    const exclude = o.exclude?.trim() || null;
+    if (sel && exclude && await hideExcluded(page, sel, exclude)) log(`\n경고: ${coverMessage(exclude)}`);
+    for (const [name, s] of [['수집 대상', sel], ['next', nextSel], ['제목', o.titleSel ?? null], ['제외', exclude]] as const) {
       if (!s) continue;
       const found = await page.eval<{ n: number; previews: string[] }>(`(() => {
         const els = [...document.querySelectorAll(${q(s)})];
