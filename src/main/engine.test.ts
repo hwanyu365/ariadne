@@ -814,3 +814,25 @@ test('mergeWritesAllPagesToOneFile', async () => {
   assert.equal(read(d, 'p_all.txt'), '본문 1');
   assert.ok(logs.some(l => l.startsWith('경고') && l.includes('p_all.txt')), logs.join('\n'));
 });
+
+test('excludeWorksUnderStrictCsp', async () => {
+  // 인라인 스타일을 막는 CSP 페이지에서도 제외가 적용된다.
+  const d = tempDir();
+  const handler: Handler = (_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "style-src 'self'" });
+    res.end(pageHtml('<p>본문</p><p class=ad>광고</p>', ''));
+  };
+  const srv = await serve(d, handler);
+  try {
+    await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: '.ad', ...quiet });
+  } finally {
+    await srv.close();
+  }
+  assert.equal(read(d, 'p_0001.txt'), '본문');
+});
+
+test('excludeCoveringTargetFails', async () => {
+  // 제외 셀렉터가 수집 대상이나 그 조상까지 가리면 무엇을 받았는지 알 수 없다 → 실패로 알린다.
+  const d = tempDir();
+  await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: 'body', ...quiet }), /제외/);
+});

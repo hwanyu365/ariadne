@@ -44,17 +44,18 @@ const firstLine = (e: unknown) => String(e instanceof Error ? e.message : e).spl
 /** selector 에 걸리는 모든 요소의 보이는 텍스트를 합쳐서 돌려준다. */
 async function readText(page: Page, selector: string, timeout: number, exclude: string | null = null): Promise<string> {
   await page.waitFor(selector, timeout);
-  // 제외 요소를 숨긴 채 innerText 로 읽어야 화면에 보이는 줄바꿈이 남는다. 문서가 바뀌면 다시 넣는다.
-  if (exclude) await page.eval(`(() => {
-    document.querySelectorAll(${q(exclude)});
-    let st = document.getElementById('ariadne-exclude');
-    if (!st) {
-      st = document.createElement('style');
-      st.id = 'ariadne-exclude';
-      (document.head || document.documentElement).append(st);
-    }
-    st.textContent = ${q(`${exclude} { display: none !important; }`)};
-  })()`);
+  // 제외 요소를 숨긴 채 innerText 로 읽어야 화면에 보이는 줄바꿈이 남는다.
+  // 인라인 <style> 은 페이지 CSP 에 막힐 수 있다 → CSP 와 무관한 CSSOM 으로 요소마다 숨기고, 늦게 붙은 요소를 위해 읽을 때마다 다시 한다.
+  if (exclude) {
+    const covered = await page.eval<boolean>(`(() => {
+      const ex = ${q(exclude)};
+      if ([...document.querySelectorAll(${q(selector)})].some(e => e.closest(ex))) return true;
+      document.querySelectorAll(ex).forEach(e => e.style.setProperty('display', 'none', 'important'));
+      return false;
+    })()`);
+    // 숨긴 요소의 innerText 는 글자 전체를 돌려준다 → 대상까지 가리면 무엇을 받았는지 알 수 없다.
+    if (covered) throw new Error(`제외 셀렉터 '${exclude}' 가 수집 대상까지 가립니다.`);
+  }
   return page.eval<string>(`[...document.querySelectorAll(${q(selector)})].map(e => e.innerText.trim()).join('\\n').trim()`);
 }
 
