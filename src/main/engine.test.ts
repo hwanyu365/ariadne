@@ -673,12 +673,14 @@ test('stopDuringDelayDoesNotTakeAnotherPage', async () => {
   // 페이지 간 대기 중에 누른 중지는 다음 페이지를 받기 전에 반영한다.
   const ctl = new AbortController();
   const began = Date.now();
-  const { n, log } = await runLogged(fixtureLink, {
-    delay: 4000, signal: ctl.signal,
-    onLog: m => { if (m.startsWith('[1]')) setTimeout(() => ctl.abort(), 800); },
+  const logs: string[] = [];
+  // 로컬 파일 사이 이동과 변경 확정은 1초 안에 끝난다 → 2초 시점은 대기 구간이다.
+  const { n } = await runLogged(fixtureLink, {
+    delay: 8000, signal: ctl.signal,
+    onLog: m => { logs.push(m); if (m.startsWith('[1]')) setTimeout(() => ctl.abort(), 2000); },
   });
-  assert.equal(n, 1, log);
-  assert.ok(Date.now() - began < 3500, `${Date.now() - began}ms`);
+  assert.equal(n, 1, logs.join('\n'));
+  assert.ok(Date.now() - began < 5000, `${Date.now() - began}ms`);
 });
 
 test('stopReasonShowsHttpStatus', async () => {
@@ -724,4 +726,24 @@ test('coveredHashNextKeepsClickReason', async () => {
   });
   assert.equal(n, 1);
   assert.match(log, /중단: next 를 누르지 못했다.*div#veil/);
+});
+
+test('sameTextOnAnotherPageContinues', async () => {
+  // 다른 주소의 페이지가 앞서 받은 페이지와 본문이 같아도 계속 받는다.
+  const bodies = ['본문 1', '(삽화)', '본문 3', '(삽화)', '본문 5'];
+  const { n, log } = await runLogged(d => {
+    bodies.forEach((b, i) => write(path.join(d, `g${i + 1}.html`), pageHtml(b, i < bodies.length - 1 ? `<a class="next" href="g${i + 2}.html">n</a>` : '')));
+    return pathToFileURL(path.join(d, 'g1.html')).href;
+  }, { maxPages: 8 });
+  assert.equal(n, 5, log);
+});
+
+test('disabledNextInsideWrapperLinkStops', async () => {
+  // next 가 링크 안의 버튼이면 감싼 링크의 주소로 넘어가지 않는다 → 카드 전체를 감싼 링크는 다음 페이지가 아니다.
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'w1.html'), pageHtml('본문 1', '<a href="w2.html"><button class="next" disabled>n</button></a>'));
+    write(path.join(d, 'w2.html'), pageHtml('엉뚱한 곳', ''));
+    return pathToFileURL(path.join(d, 'w1.html')).href;
+  });
+  assert.equal(n, 1, log);
 });

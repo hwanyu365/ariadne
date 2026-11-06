@@ -104,7 +104,8 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
     // 마지막 페이지에서 next 를 숨기는 사이트와 비활성화만 하는 사이트가 반반이라 둘 다 본다.
     const clickable = visible && !e.disabled && e.getAttribute('aria-disabled') !== 'true';
     // 셀렉터가 링크 안쪽 아이콘을 가리키는 사이트가 있다 → 감싼 링크의 주소를 쓴다.
-    const a = e.closest('a[href]');
+    // 버튼을 감싼 링크는 카드 전체 링크일 수 있다 → 링크 자신이나 링크 안 장식 요소일 때만 그 주소를 쓴다.
+    const a = e.closest('button, input, select, textarea') ? null : e.closest('a[href]');
     const h = a?.getAttribute('href') || '';
     const t = (a?.target || '').toLowerCase();
     return {
@@ -236,7 +237,8 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
     while (true) {
       pages++;
       const num = start + pages - 1;
-      seen.add(digest(current));
+      // 주소까지 보아야 다른 페이지의 같은 본문(삽화·휴재 공지)에서 멈추지 않는다. 주소가 그대로인 SPA 는 본문만 남는다.
+      seen.add(digest(`${page.url()}\n${current}`));
       last = `${num}번 ${page.url()}`;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
@@ -261,6 +263,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
       }
       if (maxPages && pages >= maxPages) break;
       // 왜 멈췄는지 남긴다. 셀렉터 오타로 1페이지만 받고 끝나는 게 가장 흔한 사고다.
+      const docs = page.documents();
       const why = await gotoNext(page, nextSel, timeout);
       if (why) {
         log(`  중단: ${why}${pages === 1 ? ' 셀렉터를 probe 로 확인하라.' : ''}`);
@@ -272,7 +275,8 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         break;
       }
       if (next === null) {
-        const status = page.status();
+        // 문서가 그대로인 SPA 는 지난 문서의 상태를 들고 있다 → 새 문서를 받았을 때만 상태를 본다.
+        const status = page.documents() !== docs ? page.status() : 0;
         log(status >= 400
           ? `  중단: next 로 넘어간 페이지가 HTTP ${status} 로 응답했다.`
           : `  중단: next 클릭 후 ${timeout}ms 동안 수집 대상이 바뀌지 않았다. 마지막 페이지거나, 로딩이 느리면 타임아웃을 늘려야 한다.`);
@@ -283,7 +287,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         await scrollFor(page, log);
         next = await read(page, sel, timeout);
       }
-      if (seen.has(digest(next))) {
+      if (seen.has(digest(`${page.url()}\n${next}`))) {
         log('  중단: next 가 이미 받은 페이지로 돌아왔다. 마지막 페이지로 본다.');
         break;
       }

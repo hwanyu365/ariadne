@@ -28,6 +28,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 export class Page {
   private raw = Buffer.alloc(0);
   private lastStatus = 0;
+  private docs = 0;
   private cleanup: (() => void)[] = [];
 
   private constructor(readonly win: BrowserWindow, private send: Send) {}
@@ -84,7 +85,8 @@ export class Page {
       // 이번 문서의 바이트를 못 얻으면 지난 문서로 판정하게 된다 → 먼저 비운다.
       if (ev.frameId === main) {
         this.raw = Buffer.alloc(0);
-        this.lastStatus = ev.responseStatusCode;
+        this.lastStatus = ev.responseStatusCode ?? 0;
+        this.docs++;
       }
       try {
         if (ev.frameId === main && ev.responseStatusCode >= 200 && ev.responseStatusCode < 300) {
@@ -130,6 +132,11 @@ export class Page {
   /** 마지막으로 받은 메인 문서의 HTTP 상태. 아직 없으면 0 이다. */
   status(): number {
     return this.lastStatus;
+  }
+
+  /** 지금까지 받은 메인 문서 수. 값이 바뀌었으면 새 문서로 넘어간 것이다. */
+  documents(): number {
+    return this.docs;
   }
 
   url(): string {
