@@ -836,3 +836,18 @@ test('excludeCoveringTargetFails', async () => {
   const d = tempDir();
   await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: 'body', ...quiet }), /제외/);
 });
+
+test('probeAppliesExclude', async () => {
+  // probe 도 수집과 같은 제외를 거쳐 미리보기를 보인다. 대상까지 가리면 알린다.
+  const d = tempDir();
+  write(path.join(d, 'p.html'), pageHtml('<p>본문</p><p class=ad>광고</p>', ''));
+  const url = pathToFileURL(path.join(d, 'p.html')).href;
+  const logs: string[] = [];
+  await probe(url, '#c', null, { timeout: 5000, exclude: '.ad', onLog: m => logs.push(m) });
+  const all = logs.join('\n');
+  assert.match(all, /제외 '\.ad' -> 1개 매치/);
+  assert.match(all, /'#c' -> 1개 매치\n\s+\[0\] '본문'/);
+  const covered: string[] = [];
+  await probe(url, '#c', null, { timeout: 5000, exclude: 'body', onLog: m => covered.push(m) });
+  assert.ok(covered.some(l => l.includes('경고') && l.includes('제외')), covered.join('\n'));
+});

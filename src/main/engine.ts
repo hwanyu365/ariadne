@@ -41,21 +41,26 @@ const pad = (n: number, digits: number) => String(n).padStart(digits, '0');
 const q = JSON.stringify;
 const firstLine = (e: unknown) => String(e instanceof Error ? e.message : e).split('\n')[0];
 
+// 숨긴 요소의 innerText 는 글자 전체를 돌려준다 → 대상까지 가리면 무엇을 받았는지 알 수 없다.
+const coverMessage = (exclude: string) => `제외 셀렉터 '${exclude}' 가 수집 대상까지 가립니다.`;
+
+/**
+ * 제외 요소를 숨겨 innerText 가 화면에 보이는 줄바꿈대로 나머지를 읽게 한다. 수집 대상까지 가리면 숨기지 않고 true 를 돌려준다.
+ * 인라인 <style> 은 페이지 CSP 에 막힐 수 있다 → CSP 와 무관한 CSSOM 으로 요소마다 숨기고, 늦게 붙은 요소를 위해 읽을 때마다 다시 한다.
+ */
+function hideExcluded(page: Page, selector: string, exclude: string): Promise<boolean> {
+  return page.eval<boolean>(`(() => {
+    const ex = ${q(exclude)};
+    if ([...document.querySelectorAll(${q(selector)})].some(e => e.closest(ex))) return true;
+    document.querySelectorAll(ex).forEach(e => e.style.setProperty('display', 'none', 'important'));
+    return false;
+  })()`);
+}
+
 /** selector 에 걸리는 모든 요소의 보이는 텍스트를 합쳐서 돌려준다. */
 async function readText(page: Page, selector: string, timeout: number, exclude: string | null = null): Promise<string> {
   await page.waitFor(selector, timeout);
-  // 제외 요소를 숨긴 채 innerText 로 읽어야 화면에 보이는 줄바꿈이 남는다.
-  // 인라인 <style> 은 페이지 CSP 에 막힐 수 있다 → CSP 와 무관한 CSSOM 으로 요소마다 숨기고, 늦게 붙은 요소를 위해 읽을 때마다 다시 한다.
-  if (exclude) {
-    const covered = await page.eval<boolean>(`(() => {
-      const ex = ${q(exclude)};
-      if ([...document.querySelectorAll(${q(selector)})].some(e => e.closest(ex))) return true;
-      document.querySelectorAll(ex).forEach(e => e.style.setProperty('display', 'none', 'important'));
-      return false;
-    })()`);
-    // 숨긴 요소의 innerText 는 글자 전체를 돌려준다 → 대상까지 가리면 무엇을 받았는지 알 수 없다.
-    if (covered) throw new Error(`제외 셀렉터 '${exclude}' 가 수집 대상까지 가립니다.`);
-  }
+  if (exclude && await hideExcluded(page, selector, exclude)) throw new Error(coverMessage(exclude));
   return page.eval<string>(`[...document.querySelectorAll(${q(selector)})].map(e => e.innerText.trim()).join('\\n').trim()`);
 }
 
@@ -343,6 +348,7 @@ export interface ProbeOptions {
   /** 창을 띄웠을 때 사용자가 확인을 마칠 때까지 기다린다. */
   pause?: () => Promise<void>;
   charset?: string | null;
+  exclude?: string | null;
 }
 
 export async function probe(url: string, sel: string | null, nextSel: string | null, o: ProbeOptions = {}): Promise<void> {
@@ -359,7 +365,10 @@ export async function probe(url: string, sel: string | null, nextSel: string | n
     const warn = charsetWarning(actual, page.docBytes(), charset);
     if (warn) log(warn);
 
-    for (const [name, s] of [['수집 대상', sel], ['next', nextSel], ['제목', o.titleSel ?? null]] as const) {
+    // 미리보기가 수집 결과와 같아야 제외 셀렉터가 맞는지 판단할 수 있다.
+    const exclude = o.exclude?.trim() || null;
+    if (sel && exclude && await hideExcluded(page, sel, exclude)) log(`\n경고: ${coverMessage(exclude)}`);
+    for (const [name, s] of [['수집 대상', sel], ['next', nextSel], ['제목', o.titleSel ?? null], ['제외', exclude]] as const) {
       if (!s) continue;
       const found = await page.eval<{ n: number; previews: string[] }>(`(() => {
         const els = [...document.querySelectorAll(${q(s)})];

@@ -95,6 +95,7 @@ async function run(req: StartRequest, { text, nums }: ReturnType<typeof parseInp
       log('probe 중... 브라우저 창을 띄웠으면 확인한 뒤 [중지] 를 누르면 닫힙니다.');
       await probe(text.url, text.sel || null, text.next || null, {
         timeout: nums.timeout, headful: req.headful, titleSel: text.title || null, delay: nums.delay, onLog: log, charset: text.charset,
+        exclude: req.mode === 'text' ? text.exclude || null : null,
         pause: () => new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true })),
       });
     } else {
