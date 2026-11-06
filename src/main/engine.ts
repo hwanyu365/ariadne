@@ -148,7 +148,8 @@ const MAGIC: [string, (b: Buffer) => boolean][] = [
   ['.gif', b => b.subarray(0, 4).toString('latin1') === 'GIF8'],
   ['.webp', b => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP'],
   ['.avif', b => b.subarray(4, 12).toString('latin1') === 'ftypavif'],
-  ['.bmp', b => b.subarray(0, 2).toString('latin1') === 'BM'],
+  // 'BM' 두 글자로 시작하는 글자 응답도 있다 → DIB 헤더 크기까지 맞아야 BMP 로 본다.
+  ['.bmp', b => b.length >= 26 && b.subarray(0, 2).toString('latin1') === 'BM' && [12, 40, 52, 56, 64, 108, 124].includes(b.readUInt32LE(14))],
 ];
 
 /** 받은 내용이 이미지면 확장자를, 아니면 null 을 돌려준다. CDN 은 주소의 확장자와 다른 형식을 보내기도 한다. */
@@ -239,7 +240,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
       const num = start + pages - 1;
       // 주소까지 보아야 다른 페이지의 같은 본문(삽화·휴재 공지)에서 멈추지 않는다. 주소가 그대로인 SPA 는 본문만 남는다.
       seen.add(digest(`${page.url()}\n${current}`));
-      last = `${num}번 ${page.url()}`;
+      const here = `${num}번 ${page.url()}`;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
         const n = await saveImages(page, current.split('\n').filter(Boolean), base, num, digits, log, timeout, o.signal);
@@ -256,6 +257,8 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
           }
         }
       }
+      // 이어 받기 기준이므로 저장을 마친 페이지만 남긴다.
+      last = here;
 
       if (o.signal?.aborted) {
         log('  중단: 사용자 중지.');
