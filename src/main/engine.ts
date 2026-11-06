@@ -26,7 +26,11 @@ const MIME_EXTS: Record<string, string> = {
   'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
   'image/avif': '.avif', 'image/bmp': '.bmp', 'image/svg+xml': '.svg',
 };
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>(r => {
+  const t = setTimeout(done, ms);
+  function done() { clearTimeout(t); signal?.removeEventListener('abort', done); r(); }
+  signal?.addEventListener('abort', done, { once: true });
+});
 const pad = (n: number, digits: number) => String(n).padStart(digits, '0');
 const q = JSON.stringify;
 const firstLine = (e: unknown) => String(e instanceof Error ? e.message : e).split('\n')[0];
@@ -41,10 +45,10 @@ async function readText(page: Page, selector: string, timeout: number): Promise<
 async function readSrcs(page: Page, selector: string, timeout: number): Promise<string> {
   // 지연 로딩 이미지는 주소가 붙기 전까지 크기가 0 이라 visible 로는 기다릴 수 없다.
   await page.waitFor(selector, timeout, 'attached');
-  // 지연 로딩 사이트는 src 에 placeholder 를 넣고 실제 주소를 data-src 에 둔다.
+  // 지연 로딩 사이트는 src 에 placeholder 를 넣고 실제 주소를 data-* 에 둔다.
   const srcs = await page.eval<string[]>(`[...document.querySelectorAll(${q(selector)})]
-    .map(e => e.dataset.src || e.getAttribute('data-src') || e.currentSrc || e.src || '')`);
-  return srcs.filter(s => s && !s.startsWith('data:')).join('\n');
+    .map(e => e.getAttribute('data-src') || e.getAttribute('data-original') || e.getAttribute('data-lazy-src') || e.currentSrc || e.src || '')`);
+  return [...new Set(srcs.filter(s => s && !s.startsWith('data:')))].join('\n');
 }
 
 /** 지연 로딩 이미지는 화면에 들어와야 주소가 채워지므로 한 번 훑어 내린다. */
@@ -65,14 +69,22 @@ async function readTitle(page: Page, selector: string): Promise<string> {
 }
 
 /** SPA 는 next 클릭 후에도 URL·DOM 이 그대로일 수 있어, 수집 대상이 실제로 바뀔 때까지 폴링한다. */
-async function waitChange(page: Page, selector: string, old: string, timeout: number, read: typeof readText) {
+async function waitChange(page: Page, selector: string, old: string, timeout: number, read: typeof readText, signal?: AbortSignal) {
   const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
+  let seen = '';
+  while (Date.now() < deadline && !signal?.aborted) {
     const cur = await read(page, selector, 1000).catch(() => '');
-    if (cur && cur !== old) return cur;
-    await sleep(200);
+    // 나눠 그려지는 본문은 첫 변화가 일부일 수 있다 → 잠시 뒤 다시 읽어 같을 때 확정한다.
+    if (cur && cur !== old && cur === seen) return cur;
+    seen = cur;
+    await sleep(cur && cur !== old ? 300 : 200, signal);
   }
   return null;
+}
+
+/** 스크롤은 지연 이미지를 채우는 보조 단계다 → 끝나지 않는 페이지에서도 수집은 계속한다. */
+async function scrollFor(page: Page, log: Log) {
+  await scrollAll(page).catch(e => log(`  경고: 페이지 끝까지 스크롤하지 못했다 (${firstLine(e).slice(0, 60)})`));
 }
 
 /** 주소는 원격 페이지가 정한다 → 웹 주소이거나 지금 페이지와 같은 스킴일 때만 따라간다. 원격 페이지가 로컬 파일을 가리키게 하지 않는다. */
@@ -82,23 +94,28 @@ export function reachable(url: URL, pageUrl: string): boolean {
 
 /** 다음 페이지로 넘긴다. 성공하면 null, 못 넘기면 사유 문자열. */
 async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<string | null> {
-  const state = await page.eval<{ clickable: boolean; href: string } | null>(`(() => {
+  const state = await page.eval<{ clickable: boolean; href: string; blank: boolean } | null>(`(() => {
     const e = document.querySelector(${q(nextSel)});
     if (!e) return null;
     const r = e.getBoundingClientRect();
     const visible = r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden';
     // 마지막 페이지에서 next 를 숨기는 사이트와 비활성화만 하는 사이트가 반반이라 둘 다 본다.
     const clickable = visible && !e.disabled && e.getAttribute('aria-disabled') !== 'true';
-    return { clickable, href: e.getAttribute('href') || '' };
+    // 셀렉터가 링크 안쪽 아이콘을 가리키는 사이트가 있다 → 감싼 링크의 주소를 쓴다.
+    const a = e.closest('a[href]');
+    return { clickable, href: a?.getAttribute('href') || '', blank: a?.target === '_blank' };
   })()`);
   if (!state) return `next 셀렉터 '${nextSel}' 에 걸리는 요소가 없다.`;
-  if (state.clickable) {
+  let clickError = '';
+  // 새 탭 링크는 눌러도 새 창이 거부돼 아무 일도 없다 → 주소로 넘어간다.
+  if (state.clickable && !(state.blank && state.href)) {
     try {
       await page.click(nextSel);
+      return null;
     } catch (e) {
-      return `next 를 누르지 못했다: ${firstLine(e)}`;
+      clickError = `next 를 누르지 못했다: ${firstLine(e)}`;
+      if (!state.href) return clickError;
     }
-    return null;
   }
   // 숨김·비활성이어도 href 가 살아 있으면 직접 이동한다.
   // 마지막이 아닌 페이지에서도 next 를 CSS 로만 죽여두는 사이트가 있어서, 여기서 포기하면 1페이지만 받고 끝난다.
@@ -109,14 +126,28 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
     try {
       await page.goto(to.href, timeout);
     } catch (e) {
-      return `next 의 주소로 이동하지 못했다: ${firstLine(e)}`;
+      return `${clickError ? `${clickError} ` : ''}next 의 주소로 이동하지 못했다: ${firstLine(e)}`;
     }
     return null;
   }
   return 'next 요소는 있으나 숨김/비활성이고 href 도 없다. 마지막 페이지로 본다.';
 }
 
-function imageExt(url: string, contentType: string | null): string {
+const MAGIC: [string, (b: Buffer) => boolean][] = [
+  ['.png', b => b.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))],
+  ['.jpg', b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
+  ['.gif', b => b.subarray(0, 4).toString('latin1') === 'GIF8'],
+  ['.webp', b => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP'],
+  ['.avif', b => b.subarray(4, 12).toString('latin1') === 'ftypavif'],
+  ['.bmp', b => b.subarray(0, 2).toString('latin1') === 'BM'],
+];
+
+/** 받은 내용이 이미지면 확장자를, 아니면 null 을 돌려준다. CDN 은 주소의 확장자와 다른 형식을 보내기도 한다. */
+function imageExt(url: string, contentType: string | null, body: Buffer): string | null {
+  const sniffed = MAGIC.find(([, is]) => is(body))?.[0];
+  if (sniffed) return sniffed;
+  // 핫링크 차단은 200 과 HTML 로 답한다 → 내용으로도 형식으로도 이미지가 아니면 받지 않는다.
+  if (!(contentType ?? '').trim().toLowerCase().startsWith('image/')) return null;
   const ext = path.extname(new URL(url).pathname).toLowerCase();
   if (IMAGE_EXTS.includes(ext)) return ext;
   return MIME_EXTS[(contentType ?? '').split(';')[0].trim()] ?? '.bin';
@@ -138,8 +169,14 @@ async function saveImages(page: Page, srcs: string[], prefix: string, num: numbe
         log(`  건너뜀 HTTP ${resp.status} ${url.slice(0, 80)}`);
         continue;
       }
-      const out = `${prefix}_${pad(num, digits)}_${pad(i + 1, 3)}${imageExt(url, resp.headers.get('content-type'))}`;
-      fs.writeFileSync(out, Buffer.from(await resp.arrayBuffer()));
+      const type = resp.headers.get('content-type');
+      const body = Buffer.from(await resp.arrayBuffer());
+      const ext = imageExt(url, type, body);
+      if (!ext) {
+        log(`  건너뜀 이미지가 아닌 응답(${type || '형식 없음'}) ${url.slice(0, 80)}`);
+        continue;
+      }
+      fs.writeFileSync(`${prefix}_${pad(num, digits)}_${pad(i + 1, 3)}${ext}`, body);
       saved++;
     } catch (e) {
       if (signal?.aborted) break;      // 사용자 중지는 남은 장을 하나씩 실패로 남기지 않는다
@@ -170,17 +207,24 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
   const read = images ? readSrcs : readText;
   const base = prefix;
   fs.mkdirSync(path.dirname(base), { recursive: true });
+  const first = `${path.basename(base)}_${pad(start, digits)}`;
+  const clash = fs.readdirSync(path.dirname(base)).find(f => images ? f.startsWith(`${first}_`) : f === `${first}.txt`);
+  if (clash) log(`경고: 이미 있는 파일을 덮어쓴다: ${clash}`);
   let pages = 0;
+  let last = '';
+  const seen = new Set<string>();
   const page = await Page.open({ show: !!o.headful, charset, cdp: o.cdp });
   try {
     await page.goto(url, timeout);
-    if (images) await scrollAll(page);
+    if (images) await scrollFor(page, log);
     let current = await read(page, sel, timeout);
     let warned = images;                 // 이미지는 인코딩과 무관하다
 
     while (true) {
       pages++;
       const num = start + pages - 1;
+      seen.add(current);
+      last = `${num}번 ${page.url()}`;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
         const n = await saveImages(page, current.split('\n').filter(Boolean), base, num, digits, log, timeout, o.signal);
@@ -209,20 +253,36 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         log(`  중단: ${why}${pages === 1 ? ' 셀렉터를 probe 로 확인하라.' : ''}`);
         break;
       }
-      let next = await waitChange(page, sel, current, timeout, read);
+      let next = await waitChange(page, sel, current, timeout, read, o.signal);
+      if (o.signal?.aborted) {
+        log('  중단: 사용자 중지.');
+        break;
+      }
       if (next === null) {
-        log(`  중단: next 클릭 후 ${timeout}ms 동안 수집 대상이 바뀌지 않았다. 마지막 페이지거나, 로딩이 느리면 타임아웃을 늘려야 한다.`);
+        const status = page.status();
+        log(status >= 400
+          ? `  중단: next 로 넘어간 페이지가 HTTP ${status} 로 응답했다.`
+          : `  중단: next 클릭 후 ${timeout}ms 동안 수집 대상이 바뀌지 않았다. 마지막 페이지거나, 로딩이 느리면 타임아웃을 늘려야 한다.`);
         break;
       }
       if (images) {
         // 바뀐 것만 보고 넘어가면 아직 주소가 안 붙은 지연 이미지를 놓친다.
-        await scrollAll(page);
+        await scrollFor(page, log);
         next = await read(page, sel, timeout);
       }
+      if (seen.has(next)) {
+        log('  중단: next 가 이미 받은 페이지로 돌아왔다. 마지막 페이지로 본다.');
+        break;
+      }
       current = next;
-      if (delay) await sleep(delay);
+      if (delay) await sleep(delay, o.signal);
+      if (o.signal?.aborted) {
+        log('  중단: 사용자 중지.');
+        break;
+      }
     }
   } finally {
+    if (last) log(`  마지막으로 받은 페이지: ${last}`);
     page.close();
   }
   return pages;

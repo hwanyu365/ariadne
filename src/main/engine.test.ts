@@ -569,3 +569,149 @@ test('imagePageWithoutAddressesSavesNothing', async () => {
   assert.deepEqual(outFiles(d, /./), []);
   assert.ok(logs.some(l => l.startsWith('[1] 이미지 0장')), logs.join('\n'));
 });
+
+async function runLogged(make: (d: string) => string, opts: ScrapeOptions = {}, sel = '#c') {
+  const d = tempDir();
+  const logs: string[] = [];
+  const n = await scrape(make(d), sel, '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m), ...opts });
+  return { d, n, logs, log: logs.join('\n'), texts: outFiles(d).map(f => read(d, f)) };
+}
+
+const pageHtml = (body: string, next: string) => `<meta charset="utf-8"><body><div id=c>${body}</div>${next}</body>`;
+
+test('stopsWhenNextReturnsToReceivedPage', async () => {
+  // 마지막 페이지의 next 가 처음으로 돌아가면 끝없이 받지 않고 멈춘다.
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'r1.html'), pageHtml('본문 1', '<a class="next" href="r2.html">n</a>'));
+    write(path.join(d, 'r2.html'), pageHtml('본문 2', '<a class="next" href="r1.html">n</a>'));
+    return pathToFileURL(path.join(d, 'r1.html')).href;
+  }, { maxPages: 6 });
+  assert.equal(n, 2, log);
+  assert.match(log, /중단: .*이미 받은 페이지/);
+});
+
+test('savesTextAfterItSettles', async () => {
+  // 본문이 나눠 그려지면 다 그려진 값을 저장한다.
+  const { texts, log } = await runLogged(d => {
+    write(path.join(d, 's.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><button class=next>n</button>
+<script>let i=1;document.querySelector('.next').onclick=()=>{ if(i>1)return; i++;
+  setTimeout(()=>{c.textContent='본문 2 앞'},300); setTimeout(()=>{c.textContent+=' 뒤';document.querySelector('.next').disabled=true},550);}</script></body>`);
+    return pathToFileURL(path.join(d, 's.html')).href;
+  });
+  assert.deepEqual(texts, ['본문 1', '본문 2 앞 뒤'], log);
+});
+
+test('newTabNextFollowsHrefInSameTab', async () => {
+  // 새 탭으로 여는 next 는 창을 만들지 않고 같은 탭에서 그 주소로 넘어간다.
+  const { n, texts, log } = await runLogged(d => {
+    for (let i = 1; i <= 3; i++)
+      write(path.join(d, `t${i}.html`), pageHtml(`본문 ${i}`, i < 3 ? `<a class="next" target="_blank" href="t${i + 1}.html">n</a>` : ''));
+    return pathToFileURL(path.join(d, 't1.html')).href;
+  });
+  assert.equal(n, 3, log);
+  assert.deepEqual(texts, ['본문 1', '본문 2', '본문 3']);
+});
+
+test('nextInsideHiddenLinkFollowsLinkHref', async () => {
+  // 셀렉터가 숨긴 링크 안쪽 아이콘을 가리켜도 감싼 링크의 주소로 넘어간다.
+  const { n, log } = await runLogged(d => {
+    for (let i = 1; i <= 2; i++)
+      write(path.join(d, `h${i}.html`), pageHtml(`본문 ${i}`, i < 2 ? `<a style="visibility:hidden" href="h${i + 1}.html"><i class="next">›</i></a>` : ''));
+    return pathToFileURL(path.join(d, 'h1.html')).href;
+  });
+  assert.equal(n, 2, log);
+});
+
+test('coveredNextFollowsHref', async () => {
+  // 다른 요소에 덮여 누를 수 없는 next 도 주소가 있으면 그 주소로 넘어간다.
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'v.html'), `${pageHtml('본문 1', '<a class="next" href="v2.html">next</a>')}<div style="position:fixed;inset:0;background:rgba(0,0,0,.01)"></div>`);
+    write(path.join(d, 'v2.html'), pageHtml('본문 2', ''));
+    return pathToFileURL(path.join(d, 'v.html')).href;
+  });
+  assert.equal(n, 2, log);
+});
+
+test('imageModeChecksResponseIsImage', async () => {
+  // 이미지가 아닌 응답은 건너뛰고, 확장자는 받은 내용으로 정한다.
+  const d = tempDir();
+  write(path.join(d, 'a.jpg'), PNG);
+  write(path.join(d, 'i.html'), '<body><div id=c><img src="a.jpg"><img src="blocked.png"></div></body>');
+  const files = staticFile();
+  const blocked: Handler = (req, res, dir) => {
+    if ((req.url ?? '').endsWith('blocked.png')) { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>hotlink</html>'); }
+    else files(req, res, dir);
+  };
+  const logs: string[] = [];
+  const srv = await serve(d, blocked);
+  try {
+    await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
+  assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('blocked.png')), logs.join('\n'));
+});
+
+test('imageModeReadsLazyAttributesOnce', async () => {
+  // data-original 같은 지연 로딩 속성을 placeholder 보다 먼저 보고, 같은 주소는 한 번만 받는다.
+  const d = tempDir();
+  write(path.join(d, 'a.png'), PNG);
+  write(path.join(d, 'blank.png'), PNG);
+  write(path.join(d, 'i.html'), '<body><div id=c><img src="blank.png" data-original="a.png"><img src="blank.png" data-lazy-src="a.png"></div></body>');
+  const logs: string[] = [];
+  const srv = await serve(d);
+  try {
+    await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png'], logs.join('\n'));
+});
+
+test('stopDuringDelayDoesNotTakeAnotherPage', async () => {
+  // 페이지 간 대기 중에 누른 중지는 다음 페이지를 받기 전에 반영한다.
+  const ctl = new AbortController();
+  const began = Date.now();
+  const { n, log } = await runLogged(fixtureLink, {
+    delay: 4000, signal: ctl.signal,
+    onLog: m => { if (m.startsWith('[1]')) setTimeout(() => ctl.abort(), 800); },
+  });
+  assert.equal(n, 1, log);
+  assert.ok(Date.now() - began < 3500, `${Date.now() - began}ms`);
+});
+
+test('stopReasonShowsHttpStatus', async () => {
+  // 넘어간 문서가 HTTP 오류면 타임아웃이 아니라 상태 코드를 사유로 남긴다.
+  const d = tempDir();
+  const handler: Handler = (req, res) => {
+    if ((req.url ?? '').endsWith('a.html')) { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(pageHtml('본문 1', '<a class="next" href="b.html">n</a>')); }
+    else { res.writeHead(503, { 'Content-Type': 'text/html' }); res.end('busy'); }
+  };
+  const logs: string[] = [];
+  const srv = await serve(d, handler);
+  try {
+    const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 1500, onLog: m => logs.push(m) });
+    assert.equal(n, 1);
+  } finally {
+    await srv.close();
+  }
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 503')), logs.join('\n'));
+});
+
+test('logsLastPageAddressAndNumber', async () => {
+  // 멈추면 마지막으로 받은 페이지의 주소와 번호를 남겨 그 자리에서 이어 받게 한다.
+  const { log } = await runLogged(fixtureLink, { start: 10 });
+  assert.match(log, /마지막으로 받은 페이지: 12번 file:.*p3\.html/);
+});
+
+test('warnsWhenFirstFileExists', async () => {
+  // 같은 저장 위치로 다시 받으면 덮어쓰기 전에 경고한다.
+  const d = tempDir();
+  const url = fixtureLink(d);
+  const logs: string[] = [];
+  const prefix = path.join(d, 'out', 'p');
+  await scrape(url, '#c', '.next', prefix, { timeout: 3000, onLog: () => {} });
+  await scrape(url, '#c', '.next', prefix, { timeout: 3000, onLog: m => logs.push(m) });
+  assert.ok(logs.some(l => l.startsWith('경고') && l.includes('p_0001.txt') && l.includes('덮어')), logs.join('\n'));
+});
