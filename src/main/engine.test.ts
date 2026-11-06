@@ -595,10 +595,12 @@ test('savesTextAfterItSettles', async () => {
   const { texts, log } = await runLogged(d => {
     write(path.join(d, 's.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><button class=next>n</button>
 <script>let i=1;document.querySelector('.next').onclick=()=>{ if(i>1)return; i++;
-  setTimeout(()=>{c.textContent='본문 2 앞'},300); setTimeout(()=>{c.textContent+=' 뒤';document.querySelector('.next').disabled=true},550);}</script></body>`);
+  // 확정 대기(300ms)보다 훨씬 짧은 80ms 간격으로 나눠 그린다 → 느린 환경에서도 중간값이 두 번 같게 읽히지 않는다.
+  const parts=['본문 2','가','나','다','라']; parts.forEach((p,k)=>setTimeout(()=>{c.textContent=parts.slice(0,k+1).join(' ');
+    if(k===parts.length-1)document.querySelector('.next').disabled=true},300+80*k));}</script></body>`);
     return pathToFileURL(path.join(d, 's.html')).href;
   });
-  assert.deepEqual(texts, ['본문 1', '본문 2 앞 뒤'], log);
+  assert.deepEqual(texts, ['본문 1', '본문 2 가 나 다 라'], log);
 });
 
 test('newTabNextFollowsHrefInSameTab', async () => {
