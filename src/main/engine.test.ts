@@ -715,3 +715,13 @@ test('warnsWhenFirstFileExists', async () => {
   await scrape(url, '#c', '.next', prefix, { timeout: 3000, onLog: m => logs.push(m) });
   assert.ok(logs.some(l => l.startsWith('경고') && l.includes('p_0001.txt') && l.includes('덮어')), logs.join('\n'));
 });
+
+test('coveredHashNextKeepsClickReason', async () => {
+  // 따라갈 주소가 없는 next 를 누르지 못하면 마지막 페이지로 보지 않고 누르지 못한 이유를 남긴다.
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'k.html'), `${pageHtml('본문 1', '<a class="next" href="#">next</a>')}<div id=veil style="position:fixed;inset:0;background:rgba(0,0,0,.01)"></div>`);
+    return pathToFileURL(path.join(d, 'k.html')).href;
+  });
+  assert.equal(n, 1);
+  assert.match(log, /중단: next 를 누르지 못했다.*div#veil/);
+});

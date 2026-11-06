@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { charsetWarning } from './charset';
@@ -27,6 +28,7 @@ const MIME_EXTS: Record<string, string> = {
   'image/avif': '.avif', 'image/bmp': '.bmp', 'image/svg+xml': '.svg',
 };
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>(r => {
+  if (signal?.aborted) return r();
   const t = setTimeout(done, ms);
   function done() { clearTimeout(t); signal?.removeEventListener('abort', done); r(); }
   signal?.addEventListener('abort', done, { once: true });
@@ -103,7 +105,13 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
     const clickable = visible && !e.disabled && e.getAttribute('aria-disabled') !== 'true';
     // 셀렉터가 링크 안쪽 아이콘을 가리키는 사이트가 있다 → 감싼 링크의 주소를 쓴다.
     const a = e.closest('a[href]');
-    return { clickable, href: a?.getAttribute('href') || '', blank: a?.target === '_blank' };
+    const h = a?.getAttribute('href') || '';
+    const t = (a?.target || '').toLowerCase();
+    return {
+      clickable,
+      href: h.startsWith('#') || /^\\s*javascript:/i.test(h) ? '' : h,
+      blank: !!t && !['_self', '_parent', '_top'].includes(t),
+    };
   })()`);
   if (!state) return `next 셀렉터 '${nextSel}' 에 걸리는 요소가 없다.`;
   let clickError = '';
@@ -119,7 +127,7 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
   }
   // 숨김·비활성이어도 href 가 살아 있으면 직접 이동한다.
   // 마지막이 아닌 페이지에서도 next 를 CSS 로만 죽여두는 사이트가 있어서, 여기서 포기하면 1페이지만 받고 끝난다.
-  if (state.href && !state.href.startsWith('#') && !state.href.startsWith('javascript:')) {
+  if (state.href) {
     const to = URL.parse(state.href, page.url());
     if (!to) return `next 의 주소 ${state.href.slice(0, 80)} 를 해석할 수 없다.`;
     if (!reachable(to, page.url())) return `next 의 주소 ${to.href.slice(0, 80)} 는 따라가지 않는다.`;
@@ -130,7 +138,7 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
     }
     return null;
   }
-  return 'next 요소는 있으나 숨김/비활성이고 href 도 없다. 마지막 페이지로 본다.';
+  return clickError || 'next 요소는 있으나 숨김/비활성이고 href 도 없다. 마지막 페이지로 본다.';
 }
 
 const MAGIC: [string, (b: Buffer) => boolean][] = [
@@ -144,13 +152,14 @@ const MAGIC: [string, (b: Buffer) => boolean][] = [
 
 /** 받은 내용이 이미지면 확장자를, 아니면 null 을 돌려준다. CDN 은 주소의 확장자와 다른 형식을 보내기도 한다. */
 function imageExt(url: string, contentType: string | null, body: Buffer): string | null {
+  if (!body.length) return null;
   const sniffed = MAGIC.find(([, is]) => is(body))?.[0];
   if (sniffed) return sniffed;
   // 핫링크 차단은 200 과 HTML 로 답한다 → 내용으로도 형식으로도 이미지가 아니면 받지 않는다.
   if (!(contentType ?? '').trim().toLowerCase().startsWith('image/')) return null;
   const ext = path.extname(new URL(url).pathname).toLowerCase();
   if (IMAGE_EXTS.includes(ext)) return ext;
-  return MIME_EXTS[(contentType ?? '').split(';')[0].trim()] ?? '.bin';
+  return MIME_EXTS[(contentType ?? '').split(';')[0].trim().toLowerCase()] ?? '.bin';
 }
 
 /** 한 페이지의 이미지를 받아 저장하고 저장한 장수를 돌려준다. */
@@ -208,11 +217,15 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
   const base = prefix;
   fs.mkdirSync(path.dirname(base), { recursive: true });
   const first = `${path.basename(base)}_${pad(start, digits)}`;
-  const clash = fs.readdirSync(path.dirname(base)).find(f => images ? f.startsWith(`${first}_`) : f === `${first}.txt`);
-  if (clash) log(`경고: 이미 있는 파일을 덮어쓴다: ${clash}`);
+  // Windows·macOS 파일시스템은 대소문자를 가리지 않는다.
+  const lower = first.toLowerCase();
+  const clash = fs.readdirSync(path.dirname(base)).find(f => images ? f.toLowerCase().startsWith(`${lower}_`) : f.toLowerCase() === `${lower}.txt`);
+  if (clash) log(`경고: 이미 같은 이름의 파일이 있어 덮어쓰거나 섞일 수 있다: ${clash}`);
   let pages = 0;
   let last = '';
+  // 장편은 본문 전체를 쌓으면 메모리가 커진다 → 해시만 남긴다.
   const seen = new Set<string>();
+  const digest = (v: string) => createHash('sha1').update(v).digest('hex');
   const page = await Page.open({ show: !!o.headful, charset, cdp: o.cdp });
   try {
     await page.goto(url, timeout);
@@ -223,7 +236,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
     while (true) {
       pages++;
       const num = start + pages - 1;
-      seen.add(current);
+      seen.add(digest(current));
       last = `${num}번 ${page.url()}`;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
@@ -270,7 +283,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         await scrollFor(page, log);
         next = await read(page, sel, timeout);
       }
-      if (seen.has(next)) {
+      if (seen.has(digest(next))) {
         log('  중단: next 가 이미 받은 페이지로 돌아왔다. 마지막 페이지로 본다.');
         break;
       }
