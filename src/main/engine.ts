@@ -159,6 +159,8 @@ function imageExt(url: string, contentType: string | null, body: Buffer): string
   if (sniffed) return sniffed;
   const mime = (contentType ?? '').split(';')[0].trim().toLowerCase();
   const ext = path.extname(new URL(url).pathname).toLowerCase();
+  // 차단 페이지를 image/* 로 내려주는 CDN 도 있다 → 마크업으로 시작하면 SVG 만 이미지로 본다.
+  if (/^\s*</.test(body.subarray(0, 64).toString('latin1')) && mime !== 'image/svg+xml') return null;
   if (mime.startsWith('image/')) return IMAGE_EXTS.includes(ext) ? ext : MIME_EXTS[mime] ?? '.bin';
   // 핫링크 차단은 200 과 HTML 로 답한다 → 형식을 밝히지 않은 응답만 주소의 확장자를 믿는다.
   const untyped = !mime || mime === 'application/octet-stream' || mime === 'binary/octet-stream';
@@ -338,7 +340,7 @@ export async function probe(url: string, sel: string | null, nextSel: string | n
       if (!s) continue;
       const found = await page.eval<{ n: number; previews: string[] }>(`(() => {
         const els = [...document.querySelectorAll(${q(s)})];
-        return { n: els.length, previews: els.slice(0, 3).map(e => e.getAttribute('src') || e.innerText || '') };
+        return { n: els.length, previews: els.slice(0, 3).map(e => e.getAttribute('data-src') || e.getAttribute('data-original') || e.getAttribute('data-lazy-src') || e.getAttribute('src') || e.innerText || '') };
       })()`);
       log(`\n${name} '${s}' -> ${found.n}개 매치`);
       found.previews.forEach((p, i) => log(`    [${i}] '${p.split(/\s+/).filter(Boolean).join(' ').slice(0, 70)}'`));

@@ -636,11 +636,12 @@ test('imageModeChecksResponseIsImage', async () => {
   // 이미지가 아닌 응답은 건너뛰고, 확장자는 받은 내용으로 정한다.
   const d = tempDir();
   write(path.join(d, 'a.jpg'), PNG);
-  write(path.join(d, 'i.html'), '<body><div id=c><img src="a.jpg"><img src="blocked.png"><img src="bm.png"></div></body>');
+  write(path.join(d, 'i.html'), '<body><div id=c><img src="a.jpg"><img src="blocked.png"><img src="bm.png"><img src="typed.png"></div></body>');
   const files = staticFile();
   const blocked: Handler = (req, res, dir) => {
     if ((req.url ?? '').endsWith('blocked.png')) { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>hotlink</html>'); }
     else if ((req.url ?? '').endsWith('bm.png')) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('BM 이미지 차단'); }
+    else if ((req.url ?? '').endsWith('typed.png')) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(' <html>hotlink</html>'); }
     else files(req, res, dir);
   };
   const logs: string[] = [];
@@ -653,6 +654,7 @@ test('imageModeChecksResponseIsImage', async () => {
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
   assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('blocked.png')), logs.join('\n'));
   assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('bm.png')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('typed.png')), logs.join('\n'));
 });
 
 test('imageModeKeepsUntypedImageByAddress', async () => {
