@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { charsetWarning } from './charset';
-import { Page, type PageOptions } from './page';
+import { Page, pickPolicy, type PageOptions } from './page';
 import { IMAGE_CANDIDATES_JS, NEXT_CANDIDATES_JS, TEXT_CANDIDATES_JS } from './picker';
 
 export type Log = (msg: string) => void;
@@ -70,9 +70,21 @@ async function readSrcs(page: Page, selector: string, timeout: number): Promise<
   // 지연 로딩 이미지는 주소가 붙기 전까지 크기가 0 이라 visible 로는 기다릴 수 없다.
   await page.waitFor(selector, timeout, 'attached');
   // 지연 로딩 사이트는 src 에 placeholder 를 넣고 실제 주소를 data-* 에 둔다.
-  const srcs = await page.eval<string[]>(`[...document.querySelectorAll(${q(selector)})]
-    .map(e => e.getAttribute('data-src') || e.getAttribute('data-original') || e.getAttribute('data-lazy-src') || e.currentSrc || e.src || '')`);
+  const srcs = await page.eval<string[]>(`[...document.querySelectorAll(${q(selector)})].map(${SRC_OF})`);
   return [...new Set(srcs.filter(s => s && !s.startsWith('data:')))].join('\n');
+}
+
+const SRC_OF = `e => e.getAttribute('data-src') || e.getAttribute('data-original') || e.getAttribute('data-lazy-src') || e.currentSrc || e.src || ''`;
+
+/** 주소마다 걸린 Referer 정책. 요소의 referrerpolicy 가 문서의 meta 보다, meta 가 응답 헤더보다 앞선다. */
+async function imagePolicies(page: Page, selector: string): Promise<Map<string, string>> {
+  const got = await page.eval<[string, string, string][]>(`(() => {
+    const meta = document.querySelector('meta[name="referrer" i]')?.content ?? '';
+    return [...document.querySelectorAll(${q(selector)})].map(e => [(${SRC_OF})(e), e.getAttribute('referrerpolicy') ?? '', meta]);
+  })()`);
+  const map = new Map<string, string>();
+  for (const [src, attr, meta] of got) if (!map.has(src)) map.set(src, pickPolicy(attr, meta, page.referrerPolicy()));
+  return map;
 }
 
 /** 지연 로딩 이미지는 화면에 들어와야 주소가 채워지므로 한 번 훑어 내린다. */
@@ -191,7 +203,7 @@ function imageExt(url: string, contentType: string | null, body: Buffer): string
 }
 
 /** 한 페이지의 이미지를 받아 저장하고 저장한 장수를 돌려준다. */
-async function saveImages(page: Page, srcs: string[], prefix: string, num: number, digits: number, log: Log, timeout: number, signal?: AbortSignal) {
+async function saveImages(page: Page, srcs: string[], policies: Map<string, string>, prefix: string, num: number, digits: number, log: Log, timeout: number, signal?: AbortSignal) {
   let saved = 0;
   for (const [i, src] of srcs.entries()) {
     const parsed = URL.parse(src, page.url());
@@ -201,7 +213,7 @@ async function saveImages(page: Page, srcs: string[], prefix: string, num: numbe
     }
     const url = parsed.href;
     try {
-      const resp = await page.fetch(url, timeout, signal);
+      const resp = await page.fetch(url, timeout, signal, policies.get(src) ?? page.referrerPolicy());
       if (!resp.ok) {
         log(`  건너뜀 HTTP ${resp.status} ${url.slice(0, 80)}`);
         continue;
@@ -277,7 +289,7 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
       const here = `${num}번 ${page.url()}`;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
-        const n = await saveImages(page, current.split('\n').filter(Boolean), base, num, digits, log, timeout, o.signal);
+        const n = await saveImages(page, current.split('\n').filter(Boolean), await imagePolicies(page, sel), base, num, digits, log, timeout, o.signal);
         log(`[${pages}] 이미지 ${n}장 -> ${path.basename(base)}_${pad(num, digits)}_*`);
       } else {
         const { size, name, body } = await saveText(page, current, base, num, digits, titleSel, log);
