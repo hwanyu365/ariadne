@@ -28,6 +28,8 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 export class Page {
   private raw = Buffer.alloc(0);
   private lastStatus = 0;
+  private policy = '';
+  private fetchPolicy: string | null = null;
   private docs = 0;
   private cleanup: (() => void)[] = [];
 
@@ -66,6 +68,14 @@ export class Page {
       dbg.attach('1.3');
       const raw: Send = (method, params) => dbg.sendCommand(method, params);
       const page = new Page(win, opts.cdp ? opts.cdp(raw) : raw);
+      // 브라우저는 리디렉션마다 Referer 를 다시 정한다 → 첫 값을 그대로 다른 서버로 넘기지 않게 단계마다 정한다.
+      // 창이 보낸 요청이 아니면 수집이 보낸 것이다. 수집은 한 번에 한 장씩 받아 정책 하나만 들고 있으면 된다.
+      ses.webRequest.onBeforeSendHeaders((d, cb) => {
+        if (d.webContentsId !== undefined || page.fetchPolicy === null) return cb({ requestHeaders: d.requestHeaders });
+        const headers = Object.fromEntries(Object.entries(d.requestHeaders).filter(([k]) => k.toLowerCase() !== 'referer'));
+        const referer = referrerFor(page.url(), d.url, page.fetchPolicy);
+        cb({ requestHeaders: referer ? { ...headers, Referer: referer } : headers });
+      });
       await page.interceptDocuments(charset);
       if (opts.picker) page.installPicker(opts.picker);
       return page;
@@ -86,6 +96,7 @@ export class Page {
       if (ev.frameId === main) {
         this.raw = Buffer.alloc(0);
         this.lastStatus = ev.responseStatusCode ?? 0;
+        this.policy = (ev.responseHeaders ?? []).find((h: { name: string }) => h.name.toLowerCase() === 'referrer-policy')?.value ?? '';
         this.docs++;
       }
       try {
@@ -232,15 +243,27 @@ export class Page {
       await this.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: 1 });
   }
 
-  /** 페이지와 같은 세션으로 받는다 → 쿠키와 referer 가 실려 핫링크를 막는 사이트에서도 통한다. */
-  fetch(url: string, timeout: number, signal?: AbortSignal): Promise<Response> {
+  /** 마지막으로 받은 메인 문서의 Referrer-Policy 응답 헤더. */
+  referrerPolicy(): string {
+    return this.policy;
+  }
+
+  /**
+   * 페이지와 같은 세션으로 받는다 → 쿠키와 referer 가 실려 핫링크를 막는 사이트에서도 통한다.
+   * policy 는 그 이미지에 걸린 Referer 정책이다.
+   */
+  async fetch(url: string, timeout: number, signal?: AbortSignal, policy = ''): Promise<Response> {
     // 응답이 멈춘 이미지 한 장이 수집과 중지를 함께 막지 않게 한다.
     const limit = AbortSignal.timeout(timeout);
-    return this.win.webContents.session.fetch(url, {
-      headers: { Referer: this.url() },
-      signal: signal ? AbortSignal.any([limit, signal]) : limit,
-    });
+    this.fetchPolicy = policy;
+    try {
+      // Referer 는 요청 단계마다 훅이 정한다 → Chromium 이 기본 정책으로 다시 판정해 막지 않게 한다.
+      return await this.win.webContents.session.fetch(url, { referrerPolicy: 'unsafe-url', signal: signal ? AbortSignal.any([limit, signal]) : limit });
+    } finally {
+      this.fetchPolicy = null;
+    }
   }
+
 
   childFrames(): WebFrameMain[] {
     return this.win.webContents.mainFrame.framesInSubtree.filter(f => f !== this.win.webContents.mainFrame);
@@ -264,6 +287,39 @@ export class Page {
   close(): void {
     this.cleanup.forEach(f => f());
     if (!this.win.isDestroyed()) this.win.destroy();
+  }
+}
+
+const POLICIES = ['no-referrer', 'no-referrer-when-downgrade', 'origin', 'origin-when-cross-origin', 'same-origin', 'strict-origin', 'strict-origin-when-cross-origin', 'unsafe-url'];
+
+/** 여러 값이면 마지막의 아는 값을 쓴다 (브라우저와 같다). */
+const knownPolicy = (v: string) => v.split(',').map(t => t.trim().toLowerCase()).filter(t => POLICIES.includes(t)).at(-1);
+
+/** 요소 속성 → 문서 meta → 응답 헤더 순으로 아는 값이 든 첫 단계의 정책. 모르는 값만 있는 단계는 브라우저처럼 건너뛴다. */
+export function pickPolicy(...stages: string[]): string {
+  return stages.map(knownPolicy).find(Boolean) ?? '';
+}
+
+/**
+ * 페이지가 그 주소를 그릴 때 브라우저가 보내는 Referer.
+ * 브라우저보다 많이 보내면 차단 회피가 되고, 덜 보내면 핫링크 판정에서 거부된다.
+ */
+export function referrerFor(pageUrl: string, target: string, policy = ''): string | null {
+  const from = URL.parse(pageUrl), to = URL.parse(target);
+  if (!from || !to || !/^https?:$/.test(from.protocol)) return null;
+  from.username = from.password = from.hash = '';
+  const full = from.href, origin = `${from.origin}/`;
+  const same = from.origin === to.origin, down = from.protocol === 'https:' && to.protocol !== 'https:';
+  const p = knownPolicy(policy);
+  switch (p) {
+    case 'no-referrer': return null;
+    case 'unsafe-url': return full;
+    case 'origin': return origin;
+    case 'same-origin': return same ? full : null;
+    case 'origin-when-cross-origin': return same ? full : origin;
+    case 'strict-origin': return down ? null : origin;
+    case 'no-referrer-when-downgrade': return down ? null : full;
+    default: return down ? null : same ? full : origin;
   }
 }
 
