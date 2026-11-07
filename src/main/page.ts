@@ -27,6 +27,8 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 /** 수집 대상 페이지 하나. Playwright 의 page 에 해당하는 것을 BrowserWindow 와 CDP 로 만든다. */
 export class Page {
   private raw = Buffer.alloc(0);
+  private lastStatus = 0;
+  private docs = 0;
   private cleanup: (() => void)[] = [];
 
   private constructor(readonly win: BrowserWindow, private send: Send) {}
@@ -81,7 +83,11 @@ export class Page {
       if (method !== 'Fetch.requestPaused') return;
       const rid = ev.requestId;
       // 이번 문서의 바이트를 못 얻으면 지난 문서로 판정하게 된다 → 먼저 비운다.
-      if (ev.frameId === main) this.raw = Buffer.alloc(0);
+      if (ev.frameId === main) {
+        this.raw = Buffer.alloc(0);
+        this.lastStatus = ev.responseStatusCode ?? 0;
+        this.docs++;
+      }
       try {
         if (ev.frameId === main && ev.responseStatusCode >= 200 && ev.responseStatusCode < 300) {
           const got = await this.send('Fetch.getResponseBody', { requestId: rid });
@@ -123,6 +129,16 @@ export class Page {
     return this.raw;
   }
 
+  /** 마지막으로 받은 메인 문서의 HTTP 상태. 아직 없으면 0 이다. */
+  status(): number {
+    return this.lastStatus;
+  }
+
+  /** 지금까지 받은 메인 문서 수. 값이 바뀌었으면 새 문서로 넘어간 것이다. */
+  documents(): number {
+    return this.docs;
+  }
+
   url(): string {
     return this.win.webContents.getURL();
   }
@@ -144,7 +160,7 @@ export class Page {
       wc.on('did-fail-load', fail);
     });
     wc.loadURL(url).catch(() => {});   // 실패는 did-fail-load 가 알린다
-    await withTimeout(ready, timeout, `${timeout}ms 안에 페이지를 열지 못했다: ${url}`).finally(off);
+    await withTimeout(ready, timeout, `${timeout}ms 안에 페이지를 열지 못했습니다: ${url}`).finally(off);
   }
 
   /** 이동 중인 문서에 걸린 평가는 끝나지 않을 수 있다 → 상한을 넘기면 실패로 돌린다. */
@@ -154,7 +170,7 @@ export class Page {
       if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
       return r.result.value as T;
     });
-    return withTimeout(run, ms, `${ms}ms 안에 페이지 평가가 끝나지 않았다.`);
+    return withTimeout(run, ms, `${ms}ms 안에 페이지 평가가 끝나지 않았습니다.`);
   }
 
   /** 페이지가 이동 중이면 평가가 끝나지 않거나 실패한다 → 정해진 시간 안의 결과만 쓴다. */
@@ -177,7 +193,7 @@ export class Page {
       if (await this.evalSoon<boolean>(check)) return;
       await sleep(100);
     }
-    throw new Error(`${timeout}ms 동안 셀렉터 ${sel} 에 걸리는 요소가 없다.`);
+    throw new Error(`${timeout}ms 동안 셀렉터 ${sel} 에 걸리는 요소가 없습니다.`);
   }
 
   /** 신뢰된 마우스 이벤트로 누른다. JS click() 은 isTrusted 를 보는 사이트에서 무시된다. */
@@ -197,7 +213,7 @@ export class Page {
         const moving = a.join() !== b.join();
         const covered = !hit || !(hit === e || e.contains(hit));
         const what = hit ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') : '화면 밖';
-        done({ x, y, ready: !moving && !covered, why: moving ? '위치가 멈추지 않았다' : covered ? '그 자리에 ' + what + ' 이(가) 있다' : '' });
+        done({ x, y, ready: !moving && !covered, why: moving ? '위치가 멈추지 않았습니다' : covered ? '그 자리에 ' + what + ' 이(가) 있습니다' : '' });
       }, 50);
     })`;
     const deadline = Date.now() + timeout;
@@ -206,10 +222,10 @@ export class Page {
     // 평가가 실패하면(undefined) 문서가 바뀌는 중일 수 있다 → 요소가 없는 것(null)과 달리 기한 안에서 다시 잰다.
     do {
       at = await this.evalSoon<At>(measure);
-      if (at === null) throw new Error(`셀렉터 ${JSON.stringify(selector)} 에 걸리는 요소가 없다.`);
+      if (at === null) throw new Error(`셀렉터 ${JSON.stringify(selector)} 에 걸리는 요소가 없습니다.`);
     } while (!at?.ready && Date.now() < deadline);
     // 덮은 요소를 누르면 엉뚱한 곳이 반응하고 원인이 가려진다 → 못 누른 사유로 돌려준다.
-    if (!at?.ready) throw new Error(`${timeout}ms 동안 ${JSON.stringify(selector)} 를 누를 수 없었다: ${at?.why ?? '페이지를 평가하지 못했다'}.`);
+    if (!at?.ready) throw new Error(`${timeout}ms 동안 ${JSON.stringify(selector)} 를 누를 수 없었습니다: ${at?.why ?? '페이지를 평가하지 못했습니다'}.`);
     // 사람처럼 포인터를 먼저 올린 뒤 누른다 → hover 를 거쳐야 클릭을 받는 페이지가 있다.
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
     for (const type of ['mousePressed', 'mouseReleased'])
@@ -237,7 +253,7 @@ export class Page {
       if (f) return f;
       await sleep(50);
     }
-    throw new Error('iframe 이 없다');
+    throw new Error('iframe 이 없습니다');
   }
 
   async whenClosed(): Promise<void> {

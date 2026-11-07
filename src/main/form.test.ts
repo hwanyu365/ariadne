@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { tempDir } from '../test/serve';
-import { DEFAULTS, loadSettings, logLevel, parseInputs, pickUpdate, progress, saveSettings, windowHeight, type Raw } from './form';
+import { DEFAULTS, InputError, loadSettings, logLevel, parseInputs, pickUpdate, progress, remember, saveSettings, siteFor, windowHeight, type Raw, type Settings } from './form';
 
 const raw = (over: Partial<Raw> = {}): Raw => ({ ...DEFAULTS, url: 'http://x', sel: '#c', next: '.next', ...over });
 
@@ -17,7 +17,7 @@ function reason(r: Raw, probe: boolean): string | null {
 }
 
 test('emptyUrlRejected', () => {
-  for (const probe of [true, false]) assert.equal(reason(raw({ url: '  ' }), probe), 'URL 을 입력하라.');
+  for (const probe of [true, false]) assert.equal(reason(raw({ url: '  ' }), probe), 'URL 을 입력해 주세요.');
 });
 
 test('selectorsRequiredOnlyForRun', () => {
@@ -29,7 +29,7 @@ test('selectorsRequiredOnlyForRun', () => {
 
 test('nonNumericRejected', () => {
   for (const key of ['max', 'start', 'digits', 'timeout', 'delay'] as const)
-    for (const probe of [true, false]) assert.match(reason(raw({ [key]: 'abc' }), probe) ?? '', /숫자여야 한다: 'abc'/, key);
+    for (const probe of [true, false]) assert.match(reason(raw({ [key]: 'abc' }), probe) ?? '', /숫자여야 합니다: 'abc'/, key);
 });
 
 test('charsetChecked', () => {
@@ -107,4 +107,70 @@ test('windowFitsScreen', () => {
   // 작업 영역(작업 표시줄 제외)보다 큰 창은 아래가 잘린다.
   assert.equal(windowHeight(1040), 900);
   for (const area of [720, 600, 1000.5]) assert.ok(windowHeight(area) <= area - 40, String(area));
+});
+
+test('inputErrorNamesField', () => {
+  // 화면이 오류를 해당 입력란에 표시하도록 어느 칸인지 함께 올린다.
+  const field = (r: Raw, probe: boolean) => {
+    try {
+      parseInputs(r, probe);
+      return null;
+    } catch (e) {
+      return e instanceof InputError ? e.field : 'not InputError';
+    }
+  };
+  assert.equal(field(raw({ url: '' }), true), 'url');
+  assert.equal(field(raw({ sel: '' }), false), 'sel');
+  assert.equal(field(raw({ next: '' }), false), 'next');
+  assert.equal(field(raw({ timeout: 'x' }), true), 'timeout');
+  assert.equal(field(raw({ charset: 'nope' }), true), 'charset');
+});
+
+test('doneLineIsSuccess', () => {
+  assert.equal(logLevel('완료: 3개 페이지'), 'ok');
+});
+
+test('pickFillsExcludeField', () => {
+  assert.equal(pickUpdate({ target: '제외', sel: '.ad' })?.key, 'exclude');
+});
+
+test('rememberKeepsRecentUrlsAndSitePresets', () => {
+  // 수집을 시작한 URL 은 최근 10개, 셀렉터 묶음은 호스트별로 남긴다.
+  let s: Settings = {};
+  for (let i = 1; i <= 12; i++) s = { ...s, ...remember(s, raw({ url: `http://a.test/ep/${i}`, sel: `#c${i}`, exclude: '.ad' }), 'text') };
+  s = { ...s, ...remember(s, raw({ url: 'http://a.test/ep/3', sel: '#c3' }), 'image') };
+  assert.equal(s.recent?.length, 10);
+  assert.equal(s.recent?.[0], 'http://a.test/ep/3');
+  assert.equal(new Set(s.recent).size, 10);
+  assert.deepEqual(siteFor(s, 'http://a.test/other'), { sel: '#c3', next: '.next', title: '', exclude: '', charset: '', mode: 'image' });
+  assert.equal(siteFor(s, 'http://b.test/'), null);
+  assert.equal(siteFor(s, 'not a url'), null);
+});
+
+test('siteListIsBounded', () => {
+  let s: Settings = {};
+  for (let i = 1; i <= 55; i++) s = { ...s, ...remember(s, raw({ url: `http://h${i}.test/` }), 'text') };
+  assert.equal(Object.keys(s.sites ?? {}).length, 50);
+  assert.equal(siteFor(s, 'http://h1.test/'), null);
+  assert.notEqual(siteFor(s, 'http://h55.test/'), null);
+});
+
+test('settingsKeepOnlyValidSitesAndRecent', () => {
+  // 사이트 설정도 파일에서 읽은 값이다 → 형태가 맞는 것만 살리고, 호스트 이름이 객체의 내부 키와 겹쳐도 안전하다.
+  const file = path.join(tempDir(), 'settings.json');
+  fs.writeFileSync(file, JSON.stringify({
+    merge: true,
+    recent: ['http://a', 3, null, 'http://b'],
+    sites: { 'a.test': { sel: '#c', next: 1, mode: 'video', extra: 'x' }, bad: 'x', __proto__: { sel: '#p' } },
+  }));
+  const got = loadSettings(file);
+  assert.equal(got.merge, true);
+  assert.deepEqual(got.recent, ['http://a', 'http://b']);
+  assert.deepEqual(got.sites?.['a.test'], { sel: '#c', next: '', title: '', exclude: '', charset: '', mode: 'text' });
+  assert.equal(Object.hasOwn(got.sites ?? {}, 'bad'), false);
+  assert.equal(({} as Record<string, unknown>).sel, undefined);
+  fs.writeFileSync(file, '{"sites": {"__proto__": {"sel": "#p"}}}');
+  const sites = loadSettings(file).sites ?? {};
+  assert.equal(Object.getPrototypeOf(sites), Object.prototype);
+  assert.equal(({} as Record<string, unknown>).sel, undefined);
 });

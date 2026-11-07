@@ -478,7 +478,7 @@ test('remotePageCannotPointAtLocalFiles', async () => {
   }
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
   assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('secret.png')), logs.join('\n'));
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('따라가지 않는다')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('따라가지 않습니다')), logs.join('\n'));
 });
 
 test('permissionsAndDownloadsDenied', async () => {
@@ -524,7 +524,7 @@ test('stopsWithReasonOnBrokenNextHref', async () => {
   write(path.join(d, 'h.html'), '<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" aria-disabled="true" href="https://[">n</a></body>');
   const n = await scrape(pathToFileURL(path.join(d, 'h.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
   assert.equal(n, 1);
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('해석할 수 없다')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('해석할 수 없습니다')), logs.join('\n'));
 });
 
 test('reachableAllowsWebAndSameSchemeOnly', () => {
@@ -551,7 +551,7 @@ test('stopsWithReasonWhenNextHrefUnreachable', async () => {
   write(path.join(d, 'u.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" aria-disabled="true" href="${closed.base}/x">n</a></body>`);
   const n = await scrape(pathToFileURL(path.join(d, 'u.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
   assert.equal(n, 1);
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('이동하지 못했다')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('이동하지 못했습니다')), logs.join('\n'));
 });
 
 test('imagePageWithoutAddressesSavesNothing', async () => {
@@ -568,4 +568,304 @@ test('imagePageWithoutAddressesSavesNothing', async () => {
   }
   assert.deepEqual(outFiles(d, /./), []);
   assert.ok(logs.some(l => l.startsWith('[1] 이미지 0장')), logs.join('\n'));
+});
+
+async function runLogged(make: (d: string) => string, opts: ScrapeOptions = {}, sel = '#c') {
+  const d = tempDir();
+  const logs: string[] = [];
+  const n = await scrape(make(d), sel, '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m), ...opts });
+  return { d, n, logs, log: logs.join('\n'), texts: outFiles(d).map(f => read(d, f)) };
+}
+
+const pageHtml = (body: string, next: string) => `<meta charset="utf-8"><body><div id=c>${body}</div>${next}</body>`;
+
+test('stopsWhenNextReturnsToReceivedPage', async () => {
+  // 마지막 페이지의 next 가 처음으로 돌아가면 끝없이 받지 않고 멈춘다.
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'r1.html'), pageHtml('본문 1', '<a class="next" href="r2.html">n</a>'));
+    write(path.join(d, 'r2.html'), pageHtml('본문 2', '<a class="next" href="r1.html">n</a>'));
+    return pathToFileURL(path.join(d, 'r1.html')).href;
+  }, { maxPages: 6 });
+  assert.equal(n, 2, log);
+  assert.match(log, /중단: .*이미 받은 페이지/);
+});
+
+test('savesTextAfterItSettles', async () => {
+  // 본문이 나눠 그려지면 다 그려진 값을 저장한다.
+  const { texts, log } = await runLogged(d => {
+    write(path.join(d, 's.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><button class=next>n</button>
+<script>let i=1;document.querySelector('.next').onclick=()=>{ if(i>1)return; i++;
+  // 확정 대기(300ms)보다 훨씬 짧은 80ms 간격으로 나눠 그린다 → 느린 환경에서도 중간값이 두 번 같게 읽히지 않는다.
+  const parts=['본문 2','가','나','다','라']; parts.forEach((p,k)=>setTimeout(()=>{c.textContent=parts.slice(0,k+1).join(' ');
+    if(k===parts.length-1)document.querySelector('.next').disabled=true},300+80*k));}</script></body>`);
+    return pathToFileURL(path.join(d, 's.html')).href;
+  });
+  assert.deepEqual(texts, ['본문 1', '본문 2 가 나 다 라'], log);
+});
+
+test('newTabNextFollowsHrefInSameTab', async () => {
+  // 새 탭으로 여는 next 는 창을 만들지 않고 같은 탭에서 그 주소로 넘어간다.
+  const { n, texts, log } = await runLogged(d => {
+    for (let i = 1; i <= 3; i++)
+      write(path.join(d, `t${i}.html`), pageHtml(`본문 ${i}`, i < 3 ? `<a class="next" target="_blank" href="t${i + 1}.html">n</a>` : ''));
+    return pathToFileURL(path.join(d, 't1.html')).href;
+  });
+  assert.equal(n, 3, log);
+  assert.deepEqual(texts, ['본문 1', '본문 2', '본문 3']);
+});
+
+test('nextInsideHiddenLinkFollowsLinkHref', async () => {
+  // 셀렉터가 숨긴 링크 안쪽 아이콘을 가리켜도 감싼 링크의 주소로 넘어간다.
+  const { n, log } = await runLogged(d => {
+    for (let i = 1; i <= 2; i++)
+      write(path.join(d, `h${i}.html`), pageHtml(`본문 ${i}`, i < 2 ? `<a style="visibility:hidden" href="h${i + 1}.html"><i class="next">›</i></a>` : ''));
+    return pathToFileURL(path.join(d, 'h1.html')).href;
+  });
+  assert.equal(n, 2, log);
+});
+
+test('coveredNextFollowsHref', async () => {
+  // 다른 요소에 덮여 누를 수 없는 next 도 주소가 있으면 그 주소로 넘어간다.
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'v.html'), `${pageHtml('본문 1', '<a class="next" href="v2.html">next</a>')}<div style="position:fixed;inset:0;background:rgba(0,0,0,.01)"></div>`);
+    write(path.join(d, 'v2.html'), pageHtml('본문 2', ''));
+    return pathToFileURL(path.join(d, 'v.html')).href;
+  });
+  assert.equal(n, 2, log);
+});
+
+test('imageModeChecksResponseIsImage', async () => {
+  // 이미지가 아닌 응답은 건너뛰고, 확장자는 받은 내용으로 정한다.
+  const d = tempDir();
+  write(path.join(d, 'a.jpg'), PNG);
+  write(path.join(d, 'i.html'), '<body><div id=c><img src="a.jpg"><img src="blocked.png"><img src="bm.png"><img src="typed.png"></div></body>');
+  const files = staticFile();
+  const blocked: Handler = (req, res, dir) => {
+    if ((req.url ?? '').endsWith('blocked.png')) { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<html>hotlink</html>'); }
+    else if ((req.url ?? '').endsWith('bm.png')) { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('BM 이미지 차단'); }
+    else if ((req.url ?? '').endsWith('typed.png')) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(Buffer.from('﻿ <html>hotlink</html>')); }
+    else files(req, res, dir);
+  };
+  const logs: string[] = [];
+  const srv = await serve(d, blocked);
+  try {
+    await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
+  assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('blocked.png')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('bm.png')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('typed.png')), logs.join('\n'));
+});
+
+test('imageModeKeepsUntypedImageByAddress', async () => {
+  // 저장소형 CDN 은 이미지를 octet-stream 으로 준다 → 내용으로 못 정해도 주소가 이미지면 받는다.
+  const d = tempDir();
+  const tiff = Buffer.concat([Buffer.from('49492a00', 'hex'), Buffer.from('fixture')]);
+  write(path.join(d, 'i.html'), '<body><div id=c><img src="s3.tif"><img src="s3.jpg"></div></body>');
+  const files = staticFile();
+  const untyped: Handler = (req, res, dir) => {
+    if ((req.url ?? '').endsWith('i.html')) return files(req, res, dir);
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+    res.end(tiff);
+  };
+  const srv = await serve(d, untyped);
+  const logs: string[] = [];
+  try {
+    await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_002.jpg'], logs.join('\n'));
+});
+
+test('imageModeReadsLazyAttributesOnce', async () => {
+  // data-original 같은 지연 로딩 속성을 placeholder 보다 먼저 보고, 같은 주소는 한 번만 받는다.
+  const d = tempDir();
+  write(path.join(d, 'a.png'), PNG);
+  write(path.join(d, 'blank.png'), PNG);
+  write(path.join(d, 'i.html'), '<body><div id=c><img src="blank.png" data-original="a.png"><img src="blank.png" data-lazy-src="a.png"></div></body>');
+  const logs: string[] = [];
+  const srv = await serve(d);
+  try {
+    await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png'], logs.join('\n'));
+});
+
+test('stopDuringDelayDoesNotTakeAnotherPage', async () => {
+  // 페이지 간 대기 중에 누른 중지는 다음 페이지를 받기 전에 반영한다.
+  const ctl = new AbortController();
+  const began = Date.now();
+  const logs: string[] = [];
+  // 로컬 파일 사이 이동과 변경 확정은 1초 안에 끝난다 → 2초 시점은 대기 구간이다.
+  const { n } = await runLogged(fixtureLink, {
+    delay: 8000, signal: ctl.signal,
+    onLog: m => { logs.push(m); if (m.startsWith('[1]')) setTimeout(() => ctl.abort(), 2000); },
+  });
+  assert.equal(n, 1, logs.join('\n'));
+  assert.ok(Date.now() - began < 5000, `${Date.now() - began}ms`);
+});
+
+test('stopReasonShowsHttpStatus', async () => {
+  // 넘어간 문서가 HTTP 오류면 타임아웃이 아니라 상태 코드를 사유로 남긴다.
+  const d = tempDir();
+  const handler: Handler = (req, res) => {
+    if ((req.url ?? '').endsWith('a.html')) { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(pageHtml('본문 1', '<a class="next" href="b.html">n</a>')); }
+    else { res.writeHead(503, { 'Content-Type': 'text/html' }); res.end('busy'); }
+  };
+  const logs: string[] = [];
+  const srv = await serve(d, handler);
+  try {
+    const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 1500, onLog: m => logs.push(m) });
+    assert.equal(n, 1);
+  } finally {
+    await srv.close();
+  }
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 503')), logs.join('\n'));
+});
+
+test('logsLastPageAddressAndNumber', async () => {
+  // 멈추면 마지막으로 받은 페이지의 주소와 번호를 남겨 그 자리에서 이어 받게 한다.
+  const { log } = await runLogged(fixtureLink, { start: 10 });
+  assert.match(log, /마지막으로 받은 페이지: 12번 file:.*p3\.html/);
+});
+
+test('warnsWhenFirstFileExists', async () => {
+  // 같은 저장 위치로 다시 받으면 덮어쓰기 전에 경고한다.
+  const d = tempDir();
+  const url = fixtureLink(d);
+  const logs: string[] = [];
+  const prefix = path.join(d, 'out', 'p');
+  await scrape(url, '#c', '.next', prefix, { timeout: 3000, onLog: () => {} });
+  await scrape(url, '#c', '.next', prefix, { timeout: 3000, onLog: m => logs.push(m) });
+  assert.ok(logs.some(l => l.startsWith('경고') && l.includes('p_0001.txt') && l.includes('덮어')), logs.join('\n'));
+});
+
+test('coveredHashNextKeepsClickReason', async () => {
+  // 따라갈 주소가 없는 next 를 누르지 못하면 마지막 페이지로 보지 않고 누르지 못한 이유를 남긴다.
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'k.html'), `${pageHtml('본문 1', '<a class="next" href="#">next</a>')}<div id=veil style="position:fixed;inset:0;background:rgba(0,0,0,.01)"></div>`);
+    return pathToFileURL(path.join(d, 'k.html')).href;
+  });
+  assert.equal(n, 1);
+  assert.match(log, /중단: next 를 누르지 못했습니다.*div#veil/);
+});
+
+test('sameTextOnAnotherPageContinues', async () => {
+  // 다른 주소의 페이지가 앞서 받은 페이지와 본문이 같아도 계속 받는다.
+  const bodies = ['본문 1', '(삽화)', '본문 3', '(삽화)', '본문 5'];
+  const { n, log } = await runLogged(d => {
+    bodies.forEach((b, i) => write(path.join(d, `g${i + 1}.html`), pageHtml(b, i < bodies.length - 1 ? `<a class="next" href="g${i + 2}.html">n</a>` : '')));
+    return pathToFileURL(path.join(d, 'g1.html')).href;
+  }, { maxPages: 8 });
+  assert.equal(n, 5, log);
+});
+
+test('disabledNextInsideWrapperLinkStops', async () => {
+  // next 가 링크 안의 버튼이면 감싼 링크의 주소로 넘어가지 않는다 → 카드 전체를 감싼 링크는 다음 페이지가 아니다.
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'w1.html'), pageHtml('본문 1', '<a href="w2.html"><button class="next" disabled>n</button></a>'));
+    write(path.join(d, 'w2.html'), pageHtml('엉뚱한 곳', ''));
+    return pathToFileURL(path.join(d, 'w1.html')).href;
+  });
+  assert.equal(n, 1, log);
+});
+
+test('linkRelNextFollowsHref', async () => {
+  // 화면에 그려지지 않는 <link rel=next> 도 주소가 있으면 그 주소로 넘어간다.
+  const { n, log } = await runLogged(d => {
+    for (let i = 1; i <= 2; i++)
+      write(path.join(d, `l${i}.html`), `<meta charset="utf-8">${i < 2 ? `<link class="next" rel="next" href="l${i + 1}.html">` : ''}<body><div id=c>본문 ${i}</div></body>`);
+    return pathToFileURL(path.join(d, 'l1.html')).href;
+  });
+  assert.equal(n, 2, log);
+});
+
+test('excludeSelectorDropsElementsFromText', async () => {
+  // 제외 요소는 보이지 않는 것으로 보고 읽는다 → 나머지 본문의 줄바꿈은 그대로다.
+  const { texts, log } = await runLogged(d => {
+    write(path.join(d, 'x1.html'), pageHtml('<p>본문 1</p><p class=ad>광고</p><p>끝 1</p>', '<a class="next" href="x2.html">n</a>'));
+    // 제외 요소만 바뀌는 페이지는 다른 페이지로 보지 않는다.
+    write(path.join(d, 'x2.html'), pageHtml('<p>본문 1</p><p class=ad>다른 광고</p><p>끝 1</p>', ''));
+    return pathToFileURL(path.join(d, 'x1.html')).href;
+  }, { exclude: '.ad' });
+  assert.deepEqual(texts, ['본문 1\n\n끝 1'], log);
+});
+
+test('excludeSelectorSyntaxErrorFails', async () => {
+  // 문법이 틀린 제외 셀렉터를 조용히 무시하면 광고가 섞인 채 성공으로 끝난다.
+  const d = tempDir();
+  await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: '.ad[', ...quiet }));
+});
+
+test('mergeWritesAllPagesToOneFile', async () => {
+  // 페이지별 txt 와 함께 받은 본문 전체를 한 파일로도 남긴다. 다시 받으면 새로 쓰고 경고한다.
+  const d = tempDir();
+  const url = fixtureLink(d);
+  const prefix = path.join(d, 'out', 'p');
+  await scrape(url, '#c', '.next', prefix, { timeout: 3000, merge: true, titleSel: '#tt', ...quiet });
+  assert.equal(read(d, 'p_all.txt'), ['1화. 제목 1\n\n본문 1', '2화. 제목 2\n\n본문 2', '3화. 제목 3\n\n본문 3'].join('\n\n'));
+  const logs: string[] = [];
+  await scrape(url, '#c', '.next', prefix, { timeout: 3000, merge: true, maxPages: 1, onLog: m => logs.push(m) });
+  assert.equal(read(d, 'p_all.txt'), '본문 1');
+  assert.ok(logs.some(l => l.startsWith('경고') && l.includes('p_all.txt')), logs.join('\n'));
+});
+
+test('excludeWorksUnderStrictCsp', async () => {
+  // 인라인 스타일을 막는 CSP 페이지에서도 제외가 적용된다.
+  const d = tempDir();
+  const handler: Handler = (_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "style-src 'self'" });
+    res.end(pageHtml('<p>본문</p><p class=ad>광고</p>', ''));
+  };
+  const srv = await serve(d, handler);
+  try {
+    await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: '.ad', ...quiet });
+  } finally {
+    await srv.close();
+  }
+  assert.equal(read(d, 'p_0001.txt'), '본문');
+});
+
+test('excludeCoveringTargetFails', async () => {
+  // 제외 셀렉터가 수집 대상이나 그 조상까지 가리면 무엇을 받았는지 알 수 없다 → 실패로 알린다.
+  const d = tempDir();
+  await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: 'body', ...quiet }), /제외/);
+});
+
+test('probeAppliesExclude', async () => {
+  // probe 도 수집과 같은 제외를 거쳐 미리보기를 보인다. 대상까지 가리면 알린다.
+  const d = tempDir();
+  write(path.join(d, 'p.html'), pageHtml('<p>본문</p><p class=ad>광고</p>', ''));
+  const url = pathToFileURL(path.join(d, 'p.html')).href;
+  const logs: string[] = [];
+  await probe(url, '#c', null, { timeout: 5000, exclude: '.ad', onLog: m => logs.push(m) });
+  const all = logs.join('\n');
+  assert.match(all, /제외 '\.ad' -> 1개 매치/);
+  assert.match(all, /'#c' -> 1개 매치\n\s+\[0\] '본문'/);
+  const covered: string[] = [];
+  await probe(url, '#c', null, { timeout: 5000, exclude: 'body', onLog: m => covered.push(m) });
+  assert.ok(covered.some(l => l.includes('경고') && l.includes('제외')), covered.join('\n'));
+});
+
+test('mergeAppendsWhenResuming', async () => {
+  // 이어 받기(시작 번호 2 이상)는 앞서 합쳐 둔 본문을 지우지 않고 이어 쓴다.
+  const d = tempDir();
+  fixtureLink(d);
+  const prefix = path.join(d, 'out', 'p');
+  await scrape(pathToFileURL(path.join(d, 'p1.html')).href, '#c', '.next', prefix, { timeout: 3000, merge: true, maxPages: 1, ...quiet });
+  await scrape(pathToFileURL(path.join(d, 'p2.html')).href, '#c', '.next', prefix, { timeout: 3000, merge: true, start: 2, ...quiet });
+  assert.equal(read(d, 'p_all.txt'), '본문 1\n\n본문 2\n\n본문 3');
+});
+
+test('excludeCoveringTargetOnLaterPageFails', async () => {
+  // 다음 페이지에서 제외가 수집 대상을 가려도 타임아웃으로 감추지 않고 그 사유로 실패한다.
+  const d = tempDir();
+  write(path.join(d, 'c1.html'), pageHtml('본문 1', '<a class="next" href="c2.html">n</a>'));
+  write(path.join(d, 'c2.html'), `<meta charset="utf-8"><body><div class=ad><div id=c>본문 2</div></div></body>`);
+  await assert.rejects(scrape(pathToFileURL(path.join(d, 'c1.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 2000, exclude: '.ad', ...quiet }), /제외/);
 });

@@ -11,7 +11,8 @@
     <h1>ariadne</h1>
     <p class="muted">페이지네이션을 끝까지 넘기며 본문과 이미지를 받아 둡니다</p>
     <div class="url-row">
-      <input name="url" class="url" placeholder="첫 페이지 주소 (https://…)" spellcheck="false" autofocus>
+      <input name="url" class="url" list="recent" placeholder="첫 페이지 주소 (https://…)" aria-label="첫 페이지 주소" spellcheck="false" autofocus>
+      <datalist id="recent"></datalist>
       <div class="segmented" role="group" aria-label="모드">
         <button type="button" data-mode="text" aria-pressed="true">텍스트</button>
         <button type="button" data-mode="image" aria-pressed="false">이미지</button>
@@ -31,14 +32,15 @@
     <p class="caption" id="hint"></p>
     <label class="field"><span>next 버튼</span><input name="next" spellcheck="false"></label>
     <label class="field"><span id="title-label">제목 (선택)</span><input name="title" spellcheck="false"></label>
+    <label class="field"><span>제외 (선택)</span><input name="exclude" spellcheck="false" placeholder="본문에서 뺄 요소 (예: .ad, .comment)"></label>
   </section>
 
   <section class="card">
     <div class="card-head"><h2>저장</h2></div>
     <div class="field">
       <span>경로 접두사</span>
-      <input name="prefix" spellcheck="false">
-      <button type="button" id="pick-dir" class="accent">폴더 선택</button>
+      <input name="prefix" aria-label="경로 접두사" spellcheck="false">
+      <button type="button" id="pick-dir" class="ghost">폴더 선택</button>
       <button type="button" id="open-dir" class="ghost">열기</button>
     </div>
     <p class="caption">…/page → page_0001.txt</p>
@@ -50,6 +52,9 @@
       <div class="row">
         <label class="inline">인코딩 <input name="charset" class="short" spellcheck="false"></label>
         <span class="caption">비우면 브라우저가 추정. 한글이 깨지면 utf-8</span>
+      </div>
+      <div class="row toggles">
+        <label class="switch"><input type="checkbox" name="merge"><span>한 파일로도 합치기 (_all.txt)</span></label>
         <label class="switch"><input type="checkbox" name="headful"><span>브라우저 창 띄우기</span></label>
       </div>
       <div class="grid">
@@ -67,10 +72,25 @@
     <button type="button" id="stop" class="secondary" disabled>중지 <kbd>Esc</kbd></button>
   </div>
 
-  <pre id="log" class="log" aria-live="polite"></pre>
+  <progress id="progress" class="progress" aria-label="진행" hidden></progress>
+
+  <div id="announce" class="sr-only" role="status"></div>
+  <div id="result" class="result" hidden>
+    <span id="result-text"></span>
+    <button type="button" id="result-open" class="ghost" hidden>폴더 열기</button>
+  </div>
+
+  <div class="log-wrap">
+    <ol id="guide" class="guide">
+      <li>첫 페이지 주소를 붙여 넣으세요.</li>
+      <li>[요소 선택] 을 눌러 열린 창에서 본문과 next 버튼을 클릭하세요. 셀렉터가 자동으로 채워집니다.</li>
+      <li>저장할 폴더를 고른 뒤 [수집 시작] 을 누르세요.</li>
+    </ol>
+    <pre id="log" class="log"></pre>
+  </div>
 
   <footer class="status">
-    <span id="st-state" class="muted">● 대기</span>
+    <span id="st-state" class="muted" role="status">● 대기</span>
     <span id="st-pages" class="muted"></span>
     <span id="st-file" class="muted file"></span>
     <span id="st-time" class="muted"></span>
