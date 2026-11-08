@@ -869,3 +869,143 @@ test('excludeCoveringTargetOnLaterPageFails', async () => {
   write(path.join(d, 'c2.html'), `<meta charset="utf-8"><body><div class=ad><div id=c>본문 2</div></div></body>`);
   await assert.rejects(scrape(pathToFileURL(path.join(d, 'c1.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 2000, exclude: '.ad', ...quiet }), /제외/);
 });
+
+test('imageRequestCarriesPageAsReferer', async () => {
+  // 핫링크를 막는 사이트는 Referer 로 판정한다 → 이미지 요청에 그 이미지가 있던 페이지 주소가 실린다.
+  const d = tempDir();
+  writeImagePages(d, 1, 'src');
+  const files = staticFile();
+  const referers: (string | undefined)[] = [];
+  const spy: Handler = (req, res, dir) => {
+    if ((req.url ?? '').endsWith('.png')) referers.push(req.headers.referer);
+    files(req, res, dir);
+  };
+  const srv = await serve(d, spy);
+  try {
+    await scrape(`${srv.base}/i1.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', ...quiet });
+  } finally {
+    await srv.close();
+  }
+  // 페이지가 그릴 때 보낸 2건과 수집이 받은 2건이다 → 4건이 아니면 수집 요청이 캐시 등으로 서버에 오지 않아 확인이 공허하다.
+  const page = `${srv.base}/i1.html`;
+  assert.deepEqual(referers, [page, page, page, page]);
+});
+
+test('crossOriginImageIsSavedWithOriginReferer', async () => {
+  // 핫링크 차단은 이미지를 다른 서버에 둔 경우다 → 다른 서버의 이미지도 받고, 페이지가 그릴 때와 같은 Referer(origin)를 싣는다.
+  const imgDir = tempDir();
+  write(path.join(imgDir, 'a.png'), PNG);
+  const files = staticFile();
+  const referers: (string | undefined)[] = [];
+  const images = await serve(imgDir, (req, res, dir) => { referers.push(req.headers.referer); files(req, res, dir); });
+  const d = tempDir();
+  write(path.join(d, 'i.html'), `<body><div id=c><img src="${images.base}/a.png"></div></body>`);
+  const site = await serve(d);
+  const logs: string[] = [];
+  try {
+    await scrape(`${site.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+  } finally {
+    await site.close();
+    await images.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png'], logs.join('\n'));
+  // 그리기 1건 + 수집 1건. 수집 요청이 서버에 오지 않으면 공허하다.
+  assert.equal(referers.length, 2, String(referers));
+  assert.deepEqual(referers, [`${site.base}/`, `${site.base}/`]);
+});
+
+test('pageReferrerPolicyDecidesReferer', async () => {
+  // 페이지가 바꾼 Referer 정책(<meta>, 응답 헤더, <img referrerpolicy>)을 따른다 → 브라우저보다 많이 보내지도, 덜 보내 차단되지도 않는다.
+  // 모르는 정책 값은 브라우저처럼 건너뛰고 다음 단계(meta → 헤더)를 쓴다.
+  const imgDir = tempDir();
+  for (const n of ['plain', 'attr', 'head']) write(path.join(imgDir, `${n}.png`), PNG);
+  const files = staticFile();
+  const got = new Map<string, string | undefined>();
+  const images = await serve(imgDir, (req, res, dir) => { got.set(req.url ?? '', req.headers.referer); files(req, res, dir); });
+  const d = tempDir();
+  const site = await serve(d, (req, res) => {
+    const head = (req.url ?? '').startsWith('/h');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...(head ? { 'Referrer-Policy': 'same-origin' } : {}) });
+    res.end(head
+      ? `<body><div id=c><img referrerpolicy="bogus" src="${images.base}/head.png"></div></body>`
+      : `<meta name="referrer" content="unsafe-url"><body><div id=c><img src="${images.base}/plain.png"><img referrerpolicy="no-referrer" src="${images.base}/attr.png"></div></body>`);
+  });
+  try {
+    await scrape(`${site.base}/m/page.html`, '#c img', '.next', path.join(d, 'out', 'm'), { timeout: 3000, mode: 'image', ...quiet });
+    await scrape(`${site.base}/h/page.html`, '#c img', '.next', path.join(d, 'out', 'h'), { timeout: 3000, mode: 'image', ...quiet });
+  } finally {
+    await site.close();
+    await images.close();
+  }
+  // 수집 요청이 그리기 요청 뒤에 오므로 경로마다 마지막 값이 수집 요청의 Referer 다.
+  assert.deepEqual(Object.fromEntries(got), {
+    '/plain.png': `${site.base}/m/page.html`,
+    '/attr.png': undefined,
+    '/head.png': undefined,
+  });
+  assert.deepEqual(outFiles(d, /./), ['h_0001_001.png', 'm_0001_001.png', 'm_0001_002.png']);
+});
+
+test('redirectedImageGetsRefererPerHop', async () => {
+  // 이미지 주소가 다른 서버로 리디렉션되면 브라우저처럼 그 서버 기준으로 Referer 를 다시 정한다 → 경로·쿼리가 다른 서버로 새지 않는다.
+  const cdnDir = tempDir();
+  write(path.join(cdnDir, 'a.png'), PNG);
+  const files = staticFile();
+  const seen: (string | undefined)[] = [];
+  const cdn = await serve(cdnDir, (req, res, dir) => { seen.push(req.headers.referer); files(req, res, dir); });
+  const d = tempDir();
+  const site = await serve(d, (req, res) => {
+    if ((req.url ?? '').startsWith('/img')) {
+      res.writeHead(302, { Location: `${cdn.base}/a.png` });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end('<body><div id=c><img src="/img/a.png"></div></body>');
+  });
+  try {
+    await scrape(`${site.base}/ep/1?no=2`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', ...quiet });
+  } finally {
+    await site.close();
+    await cdn.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
+  // 그리기 1건 + 수집 1건 모두 다른 서버에는 origin 만 보낸다.
+  assert.deepEqual(seen, [`${site.base}/`, `${site.base}/`]);
+});
+
+test('refererHookLeavesOtherRequestsAlone', async () => {
+  // 훅은 수집이 받는 요청의 Referer 만 정한다 → 페이지가 보낸 요청과, 수집 밖의 세션 요청은 그대로 둔다.
+  const imgDir = tempDir();
+  write(path.join(imgDir, 'a.png'), PNG);
+  const files = staticFile();
+  const pageOwn: (string | undefined)[] = [];
+  let outside: string | undefined;
+  const images = await serve(imgDir, (req, res, dir) => {
+    const u = req.url ?? '';
+    if (u.startsWith('/own')) pageOwn.push(req.headers.referer);
+    // 수집 요청을 늦게 끝내 그동안 페이지 요청이 섞이게 한다.
+    if (u === '/a.png') setTimeout(() => files(req, res, dir), 400);
+    else files(req, res, dir);
+  });
+  const d = tempDir();
+  const site = await serve(d, (req, res) => {
+    if ((req.url ?? '').startsWith('/outside')) outside = req.headers.referer;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`<body><div id=c><img src="${images.base}/a.png"></div>
+<script>let n = 0; setInterval(() => { const i = new Image(); i.referrerPolicy = 'no-referrer'; i.src = '${images.base}/own.png?' + n++; }, 20);</script></body>`);
+  });
+  const page = await Page.open();
+  try {
+    await page.goto(`${site.base}/p.html`, 3000);
+    await page.fetch(`${images.base}/a.png`, 3000, undefined, 'unsafe-url');
+    await page.win.webContents.session.fetch(`${site.base}/outside`, { headers: { Referer: `${site.base}/custom` } });
+  } finally {
+    page.close();
+    await site.close();
+    await images.close();
+  }
+  assert.ok(pageOwn.length > 5, String(pageOwn.length));
+  assert.deepEqual([...new Set(pageOwn)], [undefined]);
+  assert.equal(outside, `${site.base}/custom`);
+});
