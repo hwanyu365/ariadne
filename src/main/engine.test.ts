@@ -437,11 +437,13 @@ test('charsetNotJudgedFromPreviousDocument', async () => {
   const srv = await serve(d, errorPage);
   try {
     const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 5000, onLog: m => logs.push(m) });
-    assert.equal(n, 2);
+    // 오류 문서는 본문으로 저장하지 않고 멈춘다 → 판정할 문서도 남지 않는다.
+    assert.equal(n, 1);
   } finally {
     await srv.close();
   }
   assert.ok(!logs.some(l => l.includes('경고')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 404')), logs.join('\n'));
 });
 
 test('charsetForcedAcrossSites', async () => {
@@ -1008,4 +1010,136 @@ test('refererHookLeavesOtherRequestsAlone', async () => {
   assert.ok(pageOwn.length > 5, String(pageOwn.length));
   assert.deepEqual([...new Set(pageOwn)], [undefined]);
   assert.equal(outside, `${site.base}/custom`);
+});
+
+test('errorPageWithSameLayoutIsNotSaved', async () => {
+  // 오류 응답이 같은 틀로 본문 자리를 채워도 본문으로 저장하지 않고 상태 코드로 멈춘다.
+  const d = tempDir();
+  const handler: Handler = (req, res) => {
+    const ok = (req.url ?? '').endsWith('a.html');
+    res.writeHead(ok ? 200 : 503, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(pageHtml(ok ? '본문 1' : '잠시 후 다시 시도해 주세요', '<a class="next" href="b.html">n</a>'));
+  };
+  const logs: string[] = [];
+  const srv = await serve(d, handler);
+  try {
+    const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
+    assert.equal(n, 1, logs.join('\n'));
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d).map(f => read(d, f)), ['본문 1']);
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 503')), logs.join('\n'));
+});
+
+/** 주소가 그대로이고 next 를 누를 때마다 bodies 를 차례로 보이는 SPA. loop 면 마지막 뒤에 처음으로 돌아가고, 아니면 next 를 끈다. */
+function fixtureSpaBodies(d: string, bodies: string[], loop = false) {
+  write(path.join(d, 'sb.html'), `<meta charset="utf-8"><body><div id=c>${bodies[0]}</div><button class=next>next</button>
+<script>const B=${JSON.stringify(bodies)};let i=0;document.querySelector('.next').onclick=()=>{
+  if(i>=B.length-1&&!${loop})return; i=(i+1)%B.length; setTimeout(()=>{c.textContent=B[i];
+  if(i>=B.length-1&&!${loop})document.querySelector('.next').disabled=true;},100);}</script></body>`);
+  return pathToFileURL(path.join(d, 'sb.html')).href;
+}
+
+test('spaKeepsGoingOnRepeatedMiddleText', async () => {
+  // 주소가 그대로인 SPA 에서도 중간에 같은 본문(삽화·공지)이 다시 나오면 계속 받는다.
+  const { n, log } = await runLogged(d => fixtureSpaBodies(d, ['본문 1', '(삽화)', '본문 3', '(삽화)', '본문 5']), { maxPages: 8 });
+  assert.equal(n, 5, log);
+});
+
+test('spaStopsWhenBackToFirstPage', async () => {
+  // 주소가 그대로인 SPA 의 마지막 next 가 첫 페이지로 돌아가면 멈춘다.
+  const { n, log } = await runLogged(d => fixtureSpaBodies(d, ['본문 1', '본문 2', '본문 3'], true), { maxPages: 8 });
+  assert.equal(n, 3, log);
+  assert.match(log, /중단: .*이미 받은 페이지/);
+});
+
+test('imageModeLoadsLazyImagesInsideScrollBox', async () => {
+  // 본문이 스크롤 상자 안에 있으면 창을 내려도 상자 안 이미지가 화면에 들어오지 않는다 → 대상 이미지마다 화면 안으로 가져온다.
+  const d = tempDir();
+  write(path.join(d, 'real.png'), PNG);
+  write(path.join(d, 'i.html'), `<body><div id=box style="height:100px;overflow:auto"><div style="height:3000px"></div>
+<div id=c><img data-real="real.png" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div></div>
+<script>new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) e.target.src = e.target.dataset.real; }), { root: box })
+  .observe(document.querySelector('img'));</script></body>`);
+  const srv = await serve(d);
+  const logs: string[] = [];
+  try {
+    await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png'], logs.join('\n'));
+});
+
+test('overlappingFetchIsRejected', async () => {
+  // 이미지별 Referer 정책은 한 번에 하나만 들고 있다 → 겹쳐 부르면 섞이지 않게 거부한다.
+  const d = tempDir();
+  write(path.join(d, 'a.png'), PNG);
+  const files = staticFile();
+  const srv = await serve(d, (req, res, dir) => setTimeout(() => files(req, res, dir), 300));
+  const page = await Page.open();
+  try {
+    const first = page.fetch(`${srv.base}/a.png`, 3000);
+    await assert.rejects(page.fetch(`${srv.base}/a.png`, 3000), /동시에/);
+    assert.equal((await first).status, 200);
+  } finally {
+    page.close();
+    await srv.close();
+  }
+});
+
+test('spaStopsWhenCyclingThroughMiddlePages', async () => {
+  // 주소가 그대로인 SPA 가 중간 페이지로 돌아가 순환하면(1→2→3→2→3…) 같은 넘어감이 다시 나올 때 멈춘다.
+  const order = ['본문 1', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2'];
+  const { n, log } = await runLogged(d => {
+    write(path.join(d, 'cy.html'), `<meta charset="utf-8"><body><div id=c>${order[0]}</div><button class=next>next</button>
+<script>const B=${JSON.stringify(order)};let i=0;document.querySelector('.next').onclick=()=>{
+  if(i>=B.length-1)return; i++; setTimeout(()=>{c.textContent=B[i];},100);}</script></body>`);
+    return pathToFileURL(path.join(d, 'cy.html')).href;
+  }, { maxPages: 12 });
+  // 1→2, 2→3, 3→2 는 새 넘어감이고 2→3 이 다시 나와 멈춘다.
+  assert.equal(n, 4, log);
+  assert.match(log, /중단: .*이미 받은 페이지/);
+});
+
+test('errorStartPageIsNotSaved', async () => {
+  // 시작 주소(이어 받기 주소 포함)가 HTTP 오류면 오류 페이지를 1페이지로 저장하지 않고 상태 코드로 멈춘다.
+  const d = tempDir();
+  const srv = await serve(d, (_req, res) => {
+    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(pageHtml('찾을 수 없습니다', ''));
+  });
+  const logs: string[] = [];
+  try {
+    const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
+    assert.equal(n, 0, logs.join('\n'));
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), []);
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 404')), logs.join('\n'));
+});
+
+test('imageModeErrorPageIsNotSaved', async () => {
+  // 이미지 모드에서도 next 로 넘어간 오류 페이지의 이미지를 받지 않고 멈춘다.
+  const d = tempDir();
+  write(path.join(d, 'a.png'), PNG);
+  const files = staticFile();
+  const srv = await serve(d, (req, res, dir) => {
+    const u = req.url ?? '';
+    if (u.includes('.png')) return files(req, res, dir);
+    const ok = u.endsWith('i1.html');
+    res.writeHead(ok ? 200 : 503, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`<body><div id=c><img src="a.png?${ok ? 1 : 2}"></div><a class="next" href="i2.html">n</a></body>`);
+  });
+  const logs: string[] = [];
+  try {
+    const n = await scrape(`${srv.base}/i1.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', onLog: m => logs.push(m) });
+    assert.equal(n, 1, logs.join('\n'));
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 503')), logs.join('\n'));
 });
