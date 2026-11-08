@@ -255,6 +255,7 @@ export class Page {
   async fetch(url: string, timeout: number, signal?: AbortSignal, policy = ''): Promise<Response> {
     // 응답이 멈춘 이미지 한 장이 수집과 중지를 함께 막지 않게 한다.
     const limit = AbortSignal.timeout(timeout);
+    if (this.fetchPolicy !== null) throw new Error('이미지를 동시에 받지 않습니다. 앞의 요청이 끝난 뒤 받으세요.');
     this.fetchPolicy = policy;
     try {
       // Referer 는 요청 단계마다 훅이 정한다 → Chromium 이 기본 정책으로 다시 판정해 막지 않게 한다.

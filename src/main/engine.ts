@@ -122,9 +122,21 @@ async function waitChange(page: Page, selector: string, old: string, timeout: nu
   return null;
 }
 
+/** 본문이 스크롤 상자 안에 있으면 창을 내려도 상자 안이 화면에 들어오지 않는다 → 대상 이미지마다 화면 안으로 가져온다. */
+function scrollTargets(page: Page, selector: string, pause = 50) {
+  return page.eval(`(async () => {
+    for (const e of document.querySelectorAll(${q(selector)})) {
+      e.scrollIntoView({ block: 'center' });
+      await new Promise(r => setTimeout(r, ${pause}));
+    }
+    window.scrollTo(0, 0);
+  })()`, 120000);
+}
+
 /** 스크롤은 지연 이미지를 채우는 보조 단계다 → 끝나지 않는 페이지에서도 수집은 계속한다. */
-async function scrollFor(page: Page, log: Log) {
-  await scrollAll(page).catch(e => log(`  경고: 페이지 끝까지 스크롤하지 못했습니다 (${firstLine(e).slice(0, 60)})`));
+async function scrollFor(page: Page, log: Log, selector: string) {
+  await scrollAll(page).then(() => scrollTargets(page, selector))
+    .catch(e => log(`  경고: 페이지 끝까지 스크롤하지 못했습니다 (${firstLine(e).slice(0, 60)})`));
 }
 
 /** 주소는 원격 페이지가 정한다 → 웹 주소이거나 지금 페이지와 같은 스킴일 때만 따라간다. 원격 페이지가 로컬 파일을 가리키게 하지 않는다. */
@@ -276,19 +288,28 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
   let last = '';
   // 장편은 본문 전체를 쌓으면 메모리가 커진다 → 해시만 남긴다.
   const seen = new Set<string>();
-  const digest = (v: string) => createHash('sha1').update(v).digest('hex');
+  const keyOf = (v: string) => createHash('sha1').update(`${page.url()}\n${v}`).digest('hex');
+  let firstKey = '', prevUrl = '';
+  const moves = new Set<string>();
   const page = await Page.open({ show: !!o.headful, charset, cdp: o.cdp });
   try {
     await page.goto(url, timeout);
-    if (images) await scrollFor(page, log);
+    // 이어 받기 주소도 오류일 수 있다 → next 로 넘어간 문서와 같이 오류 페이지를 본문으로 저장하지 않는다.
+    if (page.status() >= 400) {
+      log(`  중단: 시작 페이지가 HTTP ${page.status()} 로 응답했습니다.`);
+      return 0;
+    }
+    if (images) await scrollFor(page, log, sel);
     let current = await read(page, sel, timeout);
     let warned = images;                 // 이미지는 인코딩과 무관하다
 
     while (true) {
       pages++;
       const num = start + pages - 1;
-      // 주소까지 보아야 다른 페이지의 같은 본문(삽화·휴재 공지)에서 멈추지 않는다. 주소가 그대로인 SPA 는 본문만 남는다.
-      seen.add(digest(`${page.url()}\n${current}`));
+      // 주소까지 보아야 다른 페이지의 같은 본문(삽화·휴재 공지)에서 멈추지 않는다.
+      seen.add(keyOf(current));
+      if (pages === 1) firstKey = keyOf(current);
+      prevUrl = page.url();
       const here = `${num}번 ${page.url()}`;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
@@ -327,23 +348,30 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         log('  중단: 사용자 중지.');
         break;
       }
+      // 문서가 그대로인 SPA 는 지난 문서의 상태를 들고 있다 → 새 문서를 받았을 때만 상태를 본다.
+      const status = page.documents() !== docs ? page.status() : 0;
+      // 오류 응답도 같은 틀로 본문 자리를 채우는 사이트가 있다 → 바뀐 값이 있어도 저장하지 않는다.
+      if (status >= 400) {
+        log(`  중단: next 로 넘어간 페이지가 HTTP ${status} 로 응답했습니다.`);
+        break;
+      }
       if (next === null) {
-        // 문서가 그대로인 SPA 는 지난 문서의 상태를 들고 있다 → 새 문서를 받았을 때만 상태를 본다.
-        const status = page.documents() !== docs ? page.status() : 0;
-        log(status >= 400
-          ? `  중단: next 로 넘어간 페이지가 HTTP ${status} 로 응답했습니다.`
-          : `  중단: next 클릭 후 ${timeout}ms 동안 수집 대상이 바뀌지 않았습니다. 마지막 페이지거나, 로딩이 느리면 타임아웃을 늘려 주세요.`);
+        log(`  중단: next 클릭 후 ${timeout}ms 동안 수집 대상이 바뀌지 않았습니다. 마지막 페이지거나, 로딩이 느리면 타임아웃을 늘려 주세요.`);
         break;
       }
       if (images) {
         // 바뀐 것만 보고 넘어가면 아직 주소가 안 붙은 지연 이미지를 놓친다.
-        await scrollFor(page, log);
+        await scrollFor(page, log, sel);
         next = await read(page, sel, timeout);
       }
-      if (seen.has(digest(`${page.url()}\n${next}`))) {
+      // 주소가 그대로면 본문만 남는다 → 중간의 같은 본문(삽화)에서 멈추지 않게, 첫 페이지로 돌아오거나 같은 넘어감이 다시 나올 때만 본다.
+      const key = keyOf(next);
+      const move = keyOf(`${current}\n→\n${next}`);
+      if (page.url() === prevUrl ? key === firstKey || moves.has(move) : seen.has(key)) {
         log('  중단: next 가 이미 받은 페이지로 돌아왔습니다. 마지막 페이지로 봅니다.');
         break;
       }
+      moves.add(move);
       current = next;
       if (delay) await sleep(delay, o.signal);
       if (o.signal?.aborted) {
