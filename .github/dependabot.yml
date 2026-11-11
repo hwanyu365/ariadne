@@ -1,10 +1,18 @@
 version: 2
 updates:
+  # 스택의 패키지 생태계(gradle, npm, pip 등)는 /adk:init 에서 같은 형식으로 추가한다.
+  # 월 1회, 생태계마다 PR 하나로 묶는다 → 버전 따라가기는 merge 부담을 줄이고, 취약점은 보안 업데이트가 따로 바로 올린다.
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      npm:
+        patterns: ["*"]
