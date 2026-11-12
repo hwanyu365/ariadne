@@ -53,9 +53,14 @@ jobs:
           cache: npm
       - if: steps.secret.outputs.ok == 'true'
         run: npm ci
-      # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스가 뜨지 않는다.
+      # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스와 bubblewrap 격리가 뜨지 않는다.
       - if: steps.secret.outputs.ok == 'true'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # 하위 프로세스 격리(CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)는 bubblewrap 이 없으면 Claude Code 가 시작하지 않는다.
+      - if: steps.secret.outputs.ok == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends bubblewrap
       - if: steps.secret.outputs.ok == 'true'
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
