@@ -34,16 +34,15 @@ jobs:
         with:
           fetch-depth: 1
       # 하위 프로세스 격리(CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)는 bubblewrap 이 없으면 Claude Code 가 시작하지 않는다.
+      # 격리 안의 셸 명령은 샌드박스로 도는데, socat 이 없으면 샌드박스가 뜨지 않아 gh 를 포함한 모든 명령이 거부된다.
       # Ubuntu 24.04 는 비특권 user namespace 를 막아 bubblewrap 이 격리 공간을 만들지 못한다.
       - run: |
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # 리뷰 요약이 남지 않는 원인을 찾는 동안만 켠다. public 저장소라 실행 로그가 공개된다.
-          show_full_output: true
           # 파일 도구가 저장소 밖(러너의 자격 파일, /proc 의 환경 변수)을 읽지 못하게 한다.
           settings: '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
           prompt: |
