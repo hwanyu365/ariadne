@@ -57,10 +57,11 @@ jobs:
       - if: steps.secret.outputs.ok == 'true'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # 하위 프로세스 격리(CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)는 bubblewrap 이 없으면 Claude Code 가 시작하지 않는다.
+      # 격리 안의 셸 명령은 샌드박스로 도는데, socat 이 없으면 샌드박스가 뜨지 않아 gh 를 포함한 모든 명령이 거부된다.
       - if: steps.secret.outputs.ok == 'true'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
       - if: steps.secret.outputs.ok == 'true'
         uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
