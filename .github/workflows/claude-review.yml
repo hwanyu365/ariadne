@@ -33,6 +33,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+      # 하위 프로세스 격리(CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)는 bubblewrap 이 없으면 Claude Code 가 시작하지 않는다.
+      # Ubuntu 24.04 는 비특권 user namespace 를 막아 bubblewrap 이 격리 공간을 만들지 못한다.
+      - run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
