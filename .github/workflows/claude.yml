@@ -23,12 +23,17 @@ jobs:
         (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
       )
     runs-on: ubuntu-latest
+    # 끝나지 않는 실행이 토큰을 계속 쓰지 않게 시간과 턴에 상한을 둔다.
+    timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
       issues: write
       id-token: write
       actions: read
+    # 실행 중 읽는 PR·코멘트는 prompt injection 경로다 → Claude 가 띄우는 하위 프로세스의 환경에서 자격 증명을 지운다.
+    env:
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
     steps:
       # secret 이 없으면(미등록, dependabot·fork 트리거) 실패 대신 건너뛴다.
       - id: secret
@@ -37,23 +42,31 @@ jobs:
         run: |
           if [ -n "$TOKEN" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else echo "::notice::CLAUDE_CODE_OAUTH_TOKEN 미등록 → 건너뜀"; fi
       - if: steps.secret.outputs.ok == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
       # agent 가 검증 명령을 직접 돌릴 수 있도록 CI 와 같은 런타임을 준비한다.
       - if: steps.secret.outputs.ok == 'true'
-        uses: actions/setup-python@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          python-version: "3.13"
+          node-version: "24"
+          cache: npm
       - if: steps.secret.outputs.ok == 'true'
-        run: pip install -r requirements.txt
+        run: npm ci
+      # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스가 뜨지 않는다.
       - if: steps.secret.outputs.ok == 'true'
-        run: python -m playwright install --with-deps chromium
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - if: steps.secret.outputs.ok == 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 파일 도구가 저장소 밖(러너의 자격 파일, /proc 의 환경 변수)을 읽지 못하게 한다.
+          settings: '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
+          # 코드 변경은 로컬 세션만 한다 → tag 모드가 기본으로 넣는 커밋·push 도구를 앱 토큰 권한과 disallowedTools 양쪽에서 막는다.
           additional_permissions: |
+            contents: read
             actions: read
           claude_args: |
-            --allowedTools "Bash(git:*),Bash(gh:*),Bash(python:*),Bash(pip:*)"
+            --max-turns 40
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh run view:*),Bash(npm run verify),Bash(xvfb-run -a npm run verify)"
+            --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Bash(git add:*),Bash(git commit:*),Bash(git rm:*),Bash(git push:*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"

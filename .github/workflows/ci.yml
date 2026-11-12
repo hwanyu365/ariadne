@@ -7,7 +7,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # main 은 실행 중인 검증을 끊지 않는다. 대기 실행은 GitHub 이 그룹마다 최신 하나만 남긴다.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -18,13 +19,27 @@ jobs:
     # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊어 merge 판정이 pending 에 갇히지 않게 한다.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 추적성 검사가 분기점을 구한다. base 끝과 비교하면 분기 뒤 main 에 추가된 테스트가 삭제로 보인다.
+          fetch-depth: 0
       # .gitignore 가 놓친 비밀 파일이 추적되면 merge 전에 막는다. 값 없는 예시 파일(*.example)은 허용한다.
       - name: Guard secrets
         run: |
-          leaked=$(git ls-files | grep -E '(^|/)\.env(\..*)?$|\.(pem|key|p12)$' | grep -vE '\.example$' || true)
+          # 목록 파일이 없으면 grep 실패가 `|| true` 에 삼켜져 가드가 통과하므로 먼저 막는다.
+          test -s .github/secret-files.regex || { echo "::error::.github/secret-files.regex 없음"; exit 1; }
+          # quotePath 를 끄지 않으면 비ASCII 경로가 따옴표로 감싸져 정규식의 $ 에 맞지 않는다.
+          leaked=$(git -c core.quotePath=false ls-files | grep -Ef .github/secret-files.regex | grep -vE '\.example$' || true)
           if [ -n "$leaked" ]; then echo "::error::committed secret files: $leaked"; exit 1; fi
-      - uses: actions/setup-node@v7
+      # 스펙 ↔ TC ↔ 테스트 이름 대조. 성숙도 poc 는 결과만 출력한다.
+      - name: Spec trace
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          # main push 는 직전 커밋이 기준이다 → 그 merge 가 더한 [확인필요] 만 실패로 본다.
+          if [ -n "$BASE" ]; then b="origin/$BASE"; elif git rev-parse -q --verify HEAD^ >/dev/null; then b=HEAD^; else b=""; fi
+          sh .github/spec-trace.sh ${b:+-b "$b"}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -32,4 +47,5 @@ jobs:
       # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스가 뜨지 않는다.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # 비밀값 없이 실행한다 → fork PR 에서도 같은 결과여야 한다. 로컬과 같은 명령을 화면 없는 X 서버에서 돌린다.
-      - run: xvfb-run -a npm run verify
+      - run: |
+          xvfb-run -a npm run verify

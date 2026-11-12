@@ -25,6 +25,11 @@ body:
       description: 스펙 근거가 있으면 ID 를 적는다 (예 FR#3)
     validations:
       required: true
+  - type: textarea
+    id: unchanged
+    attributes:
+      label: 바뀌지 않아야 할 동작
+      description: 고치면서 그대로 유지해야 하는 동작. 기존 TC 로 덮이지 않았으면 이 칸이 회귀 TC 가 된다.
   - type: input
     id: env
     attributes:
