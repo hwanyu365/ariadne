@@ -1,0 +1,16 @@
+name: 유지보수 (chore)
+description: 동작이 바뀌지 않는 변경 — CI, 의존성, 문서, 설정
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 내용
+    validations:
+      required: true
+  - type: textarea
+    id: no-behavior-change
+    attributes:
+      label: 동작이 바뀌지 않는 근거
+      description: 스펙 항목이나 사용자에게 보이는 동작이 바뀌면 기능·버그 이슈로 쓴다.
+    validations:
+      required: true

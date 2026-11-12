@@ -14,7 +14,7 @@ body:
     attributes:
       label: 인수 조건 (Given / When / Then)
       description: 실패 경로도 함께 적는다. 그대로 TC 가 된다.
-      value: |
+      placeholder: |
         Given
         When
         Then
