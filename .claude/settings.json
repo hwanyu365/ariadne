@@ -30,31 +30,53 @@
       "Read(*.keystore)",
       "Read(service-account*.json)",
       "Read(*.key)",
-      "Read(*.p12)"
+      "Read(*.p12)",
+      "Bash(git *--no-veri*)",
+      "Bash(git commit -n*)",
+      "Bash(git commit * -n *)",
+      "Bash(git commit * -n)",
+      "Bash(git * commit -n*)",
+      "Bash(git * commit * -n *)",
+      "Bash(git * commit * -n)",
+      "Bash(*hooksPath*)",
+      "Bash(*hookspath*)",
+      "Bash(*HOOKSPATH*)",
+      "Bash(*GIT_CONFIG*)",
+      "Bash(git *commit-tree*)",
+      "Bash(git *hash-object*)"
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && sh .claude/hooks/hooks-path.sh 2>&1 || true"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(git commit *)",
+            "if": "Bash(git commit*)",
             "onFailure": "block",
-            "command": "r=\"$(git rev-parse --show-toplevel)/.github/secret-files.regex\"; [ -s \"$r\" ] || { echo \"$r 없음 → 커밋 차단\" >&2; exit 2; }; f=$({ git -c core.quotePath=false diff --cached --name-only --diff-filter=d; git -c core.quotePath=false ls-files -mo --exclude-standard; } | grep -Ef \"$r\" | grep -vE '\\.example$' | sort -u); [ -z \"$f\" ] || { echo \"비밀 파일이 stage 됐거나 커밋 후보임 → 커밋 차단 (.github/secret-files.regex): $f\" >&2; exit 2; }"
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && sh .claude/hooks/hooks-path.sh --check"
           },
           {
             "type": "command",
-            "if": "Bash(git commit *)",
+            "if": "Bash(git * commit*)",
             "onFailure": "block",
-            "command": "sh \"$(git rev-parse --show-toplevel)/.claude/hooks/verify.sh\" --check"
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && sh .claude/hooks/hooks-path.sh --check"
           },
           {
             "type": "command",
-            "if": "Bash(gh pr merge *)",
             "onFailure": "block",
-            "command": "sh \"$(git rev-parse --show-toplevel)/.claude/hooks/merge-gate.sh\""
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/merge-gate.sh\""
           }
         ]
       }

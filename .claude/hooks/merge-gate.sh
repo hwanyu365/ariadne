@@ -1,20 +1,57 @@
 #!/bin/sh
-# gh pr merge 직전 hook: CI 통과, 현재 head 의 리뷰 요약, 그 요약의 Blocking 0건을 확인하고 아니면 exit 2 로 막는다.
-# --parse: 판정 없이 stdin 에서 해석한 "PR번호 match-head-commit" 만 출력한다 (자체 검사용).
+# 모든 Bash 명령 직전 hook: gh pr merge 이면 CI 통과, 현재 head 의 리뷰 요약, 그 요약의 Blocking 0건을 확인하고 아니면 exit 2 로 막는다.
+# 셸 예약어와 env·timeout 같은 감싸기는 벗기고 읽는다. gh 는 merge 글자가 보이면 gh pr merge 이거나 허용 하위 명령(ALLOW)이어야 하고, 그 밖의 명령(허용 명령 제외)은 낱말 merge 또는 gh…merge 가 보이면 막는다.
+# --parse: 판정 없이 stdin 에서 해석한 "PR번호 match-head-commit" 또는 none 만 출력한다 (자체 검사용).
 deny() { echo "merge 차단: $*" >&2; exit 2; }
+pass() { [ "$mode" = --parse ] && echo none; exit 0; }
+mode=${1-}
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/hook-lib.sh"
+# 해석 실패는 gh 글자가 보일 때 막는다 → merge 글자를 쪼갠 명령 치환도 막는다.
+load gh
 
-# stdin JSON 의 tool_input.command (JSON 이스케이프된 그대로). BSD sed 도 읽도록 ERE 로 쓴다 (BRE 의 \| 는 GNU 확장).
-cmd=$(sed -nE 's/.*"command" *: *"(([^"\\]|\\.)*)".*/\1/p' | head -n 1)
-[ -n "$cmd" ] || deny "명령을 읽지 못함"
-# 첫 gh pr merge 뒤만 본다 → --body 안에 같은 글자가 있어도 대상이 바뀌지 않는다.
-rest=${cmd#*gh pr merge}
-[ "$rest" != "$cmd" ] || deny "gh pr merge 를 찾지 못함"
-# 인용된 값은 한 토큰으로 접고, 다음 명령(&&, ||, ;, |, 줄바꿈)부터는 버린다.
-args=$(printf '%s' "$rest" | sed -E "s/\\\\\"([^\\\\]|\\\\[^\"])*\\\\\"/Q/g; s/'[^']*'/Q/g; s/(&&|\\|\\||;|\\||\\\\n).*//; s/\\\\t/ /g")
+found=""; margs=""; ghexp=""
+while IFS= read -r line; do
+  old=$IFS; IFS=$us; set -f; set -- $line; set +f; IFS=$old
+  [ "${1-}" = S ] || continue; shift
+  unwrap "$@"; shift "$drop"
+  [ $# -gt 0 ] || continue
+  name=${1##*/}; shift
+  case $name in
+    export|declare|typeset|readonly|local)
+      for a in "$@"; do case $a in GH_REPO*|GH_HOST*) ghexp=1 ;; esac; done ;;
+    gh|gh.exe)
+      # 하위 명령 자리의 확장은 펼친 뒤 무엇이 될지 모른다 → merge 글자를 쪼갠 경우까지 막는다.
+      case "${1-} ${2-}" in *'$'*|*'`'*) deny "gh 하위 명령 자리의 확장은 해석하지 않음" ;; esac
+      if [ "${1-}" = pr ] && [ "${2-}" = merge ]; then
+        case "$envs" in *" GH_REPO "*|*" GH_HOST "*) deny "GH_REPO·GH_HOST 를 붙인 merge 는 다른 저장소일 수 있음" ;; esac
+        [ -z "$ghexp" ] || deny "앞에서 GH_REPO·GH_HOST 를 export 한 뒤의 merge 는 다른 저장소일 수 있음"
+        [ -z "$found" ] || deny "한 명령에 gh pr merge 가 둘 이상임"
+        shift 2; found=1; margs=""
+        for a in "$@"; do margs="$margs$a$us"; done
+      else
+        # ALLOW: merge 하지 않는 gh 조회 하위 명령. 그 밖(gh api 등)은 merge 글자가 보이면 막는다.
+        case "${1-} ${2-}" in
+          "pr view"|"pr list"|"pr checks"|"pr status"|"pr diff"|"pr comment"|"pr create"|"pr edit"|"pr ready"|"issue view"|"issue list"|"issue comment"|"issue create"|"issue edit"|"issue close"|"run view"|"run list"|"run watch"|"search prs"|"search issues") ;;
+          *) for a in "$@"; do case $a in *merge*) deny "gh pr merge 형태가 아닌 gh 의 merge 는 해석하지 않음" ;; esac; done ;;
+        esac
+      fi ;;
+    # ALLOW: PR 을 merge 하지 않는 명령
+    git|git.exe|echo|printf|grep|egrep|fgrep|rg|cat|head|tail|ls|wc|test|'['|true|false|:) ;;
+    *)
+      for a in "$name" "$@"; do
+        case $a in merge) deny "$name 안의 merge 는 해석하지 않음" ;; *gh*merge*) deny "$name 안의 gh merge 는 해석하지 않음" ;; esac
+      done ;;
+  esac
+done <<EOS
+$segs
+EOS
+[ -n "$found" ] || pass
 
-set -f  # 토큰에 * 가 있어도 파일 이름으로 펼치지 않는다
+# 인자는 찾은 단순 명령의 낱말에서 읽는다 → 주석·따옴표 안의 같은 글자가 대상이 되지 않는다.
 n=""; mh=""; skip=""; want=""
-for a in $args; do
+old=$IFS; IFS=$us; set -f; set -- $margs; set +f; IFS=$old
+for a in "$@"; do
   if [ -n "$skip" ]; then skip=""; continue; fi
   if [ -n "$want" ]; then mh=$a; want=""; continue; fi
   case "$a" in
@@ -31,7 +68,7 @@ for a in $args; do
       esac ;;
   esac
 done
-[ "${1-}" = --parse ] && { echo "${n:--} ${mh:--}"; exit 0; }
+[ "$mode" = --parse ] && { echo "${n:--} ${mh:--}"; exit 0; }
 
 cd "$(git rev-parse --show-toplevel)" || deny "git 저장소가 아님"
 # 번호가 없으면 gh 처럼 현재 브랜치의 PR 이 대상이다.

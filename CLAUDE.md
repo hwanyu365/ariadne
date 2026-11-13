@@ -65,7 +65,10 @@ npm run verify
 ```
 
 - agent 는 `sh .claude/hooks/verify.sh` 로 실행한다 → 같은 명령에 추적성 검사를 더해 돌리고, 통과한 작업 트리를 기록한다.
-  - 통과 뒤 작업 트리(미추적 파일 포함)가 바뀌면 커밋 직전 hook 이 막는다. stage 범위는 비교하지 않는다 → 일부만 골라 커밋하지 않는다.
+  - 통과 뒤 작업 트리(미추적 파일 포함)가 바뀌면 커밋 직전 git pre-commit(`.githooks/pre-commit`)이 막는다. stage 범위는 비교하지 않는다 → 일부만 골라 커밋하지 않는다.
+  - pre-commit 은 git 이 실제로 커밋하는 작업 트리에서 돈다 → 워크트리·`git -C`·alias 와 무관하게 그 트리의 비밀 파일과 검증 기록을 본다. hook 경로(`core.hooksPath`)는 세션 시작 hook 과 `verify.sh` 가 `.githooks` 로 맞춘다. `.git/hooks` 에 기존 hook 이 있거나 다른 경로면 바꾸지 않고 실패한다 → 사람이 정리한다. 정리될 때까지는 커밋 명령 직전 hook 이 `git commit`·`git … commit` 을 막는다.
+    - pre-commit 을 건너뛰는 명령은 `.claude/settings.json` deny 가 막는다: `--no-verify`(약어 포함), `git commit -n`·`git … commit … -n`, `hooksPath`(소문자·대문자 표기), `GIT_CONFIG*`, `commit-tree`, `hash-object`.
+    - 막지 못하는 범위: deny 는 명령 문자열 규칙이라 그 밖의 형태(짧은 옵션 묶음 `-anm`, 섞인 대소문자 `HooksPath` 등)로 쓴 건너뛰기는 통과한다. 커밋 명령 직전 hook(`hooks-path.sh --check`)은 명령을 실행하기 전에 세션 작업 트리만 본다 → 한 명령 안에서 권한을 지우고 커밋하는 경우(`chmod -x … && git commit`), `.githooks/pre-commit` 이 없거나 실행할 수 없는 다른 워크트리의 `git -C … commit`, hook 경로가 틀린 클론에서 `env git commit`·`sh -c "git commit"` 처럼 `if` 패턴에 맞지 않는 커밋은 통과한다. rebase·cherry-pick·revert·merge 가 만드는 커밋은 pre-commit 을 거치지 않는다.
 - CI(`.github/workflows/ci.yml`)도 같은 명령과 추적성 검사(`.github/spec-trace.sh`)를 실행한다.
   - Linux 는 화면이 없어 `xvfb-run -a` 로 감싼다.
 - 완료 판정은 스펙 §3·§4·§6 항목별로 구현 위치와 TC 를 대조하고, 반대로 diff 의 새 분기·문구마다 근거 스펙 ID 를 찾는다 (`docs/rules_spec.md` §2.2, `/adk:verify`).
@@ -137,6 +140,8 @@ npm run verify
   - 사람 리뷰·승인이 필요한 저장소는 반영 후 amend·push → 지적 스레드마다 답글과 "리뷰 대응" 코멘트 → 재리뷰 요청 순서로 하고, 현재 head 의 승인을 확인한 뒤 merge 한다 (`/adk:ship` 3-5).
   - 같은 유형의 지적이 두 번째로 나오면 규칙으로 올린다 (`/adk:ship` 3-3). 기계로 막을 수 있으면 hook·CI, 아니면 이 파일에 한 줄.
   - `gh pr merge` 직전 hook(`.claude/hooks/merge-gate.sh`)이 CI 통과, 현재 head 의 리뷰 요약, Blocking 0건, `--match-head-commit` 을 확인하고 아니면 막는다.
+    - gh 명령에 merge 글자가 보이면 `gh pr merge` 이거나 허용 하위 명령이어야 한다. 그 밖의 명령(허용 명령 `git`·`echo`·`grep` 등 제외)은 낱말 `merge` 또는 `gh…merge` 가 보이면 막는다. gh 하위 명령 자리의 확장과 gh 가 보이는 해석 실패도 막는다.
+    - 막지 못하는 범위: 스크립트 파일·gh alias 안의 merge, 글자를 감춘 merge, REST API 직접 호출(`curl … /pulls/N/merge` 등). 브랜치 보호(CI 필수)가 있으면 그것이 최종 경계이고, 없는 저장소는 이 게이트가 유일한 경계다.
 - **코드 변경은 세션이 직접 커밋한다. `@claude` 에게 맡기지 않는다.**
   - `claude-code-action` 의 push 는 actor 가 bot 으로 기록된다 → 워크플로가 승인 대기가 되고 리뷰는 bot actor 로 거부된다. 저장소 Actions 승인 정책을 느슨하게 해도 그대로다.
   - 커밋 author 는 `claude[bot]` 으로 찍히지만 그 주소의 ID 는 bot 계정의 것이다 → author 로 actor 를 짐작할 수 없다.
