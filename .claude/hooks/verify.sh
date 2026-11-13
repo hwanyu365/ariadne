@@ -1,6 +1,6 @@
 #!/bin/sh
 # 인자 없음: CI 와 같은 검사를 돌리고, 통과하면 그 시점의 작업 트리 해시를 남긴다.
-# --check: 커밋 직전 hook. 남긴 해시와 지금 작업 트리가 다르면 막는다 → 검증 뒤 고친 채로 커밋하지 않는다.
+# --check: 커밋 직전 .githooks/pre-commit 이 부른다. 남긴 해시와 지금 작업 트리가 다르면 막는다 → 검증 뒤 고친 채로 커밋하지 않는다.
 cd "$(git rev-parse --show-toplevel)" || exit 2
 stamp=$(git rev-parse --path-format=absolute --git-path add-verified)
 
@@ -19,6 +19,9 @@ if [ "${1-}" = --check ]; then
   echo "검증 통과 뒤 작업 트리가 바뀌었거나 검증을 돌리지 않음 → 커밋 차단. sh .claude/hooks/verify.sh 를 다시 실행한다" >&2
   exit 2
 fi
+
+# 커밋 직전 검사는 git 의 pre-commit 이 한다 → hook 경로가 맞지 않으면 검증을 통과로 기록하지 않는다.
+sh .claude/hooks/hooks-path.sh || exit 2
 
 rm -f "$stamp"
 if git rev-parse -q --verify origin/main >/dev/null; then sh .github/spec-trace.sh -b origin/main; else sh .github/spec-trace.sh; fi || exit

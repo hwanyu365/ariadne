@@ -40,7 +40,8 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends bubblewrap socat
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - uses: anthropics/claude-code-action@9eb012b6d0900c2b9eede65ee1758cec4d2973e9 # v1.0.270
+      - id: claude
+        uses: anthropics/claude-code-action@9eb012b6d0900c2b9eede65ee1758cec4d2973e9 # v1.0.270
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # 파일 도구가 저장소 밖(러너의 자격 파일, /proc 의 환경 변수)을 읽지 못하게 한다.
@@ -98,7 +99,19 @@ jobs:
             - 항목 — 닫는 조건: 관측할 것. 공허해지는 시험 조건. 없으면 `없음.`
             ## 결론
             - Blocking 유무와 머지 판정
-            - 실제로 돌린 명령과 결과 / 돌리지 못한 것 (돌릴 수 있는 검증 명령·테스트는 돌린다. 남기는 것은 막힌 이유와 필요한 것을 적는다)
+            - 실제로 돌린 명령과 결과 / 돌리지 못한 것 (검증 명령·테스트는 같은 PR 의 CI 가 돌린다 → 이 실행은 돌리지 않는다. 남기는 것은 막힌 이유와 필요한 것을 적는다)
           claude_args: |
             --max-turns 60
             --allowedTools "Edit(./.claude-review/summary.md),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+      # 요약을 올리지 못하고 끝나도 action 은 성공으로 남는다 → 현재 head 의 요약이 없으면 check 를 실패시킨다. 작성자 판정은 merge-gate.sh 와 같다.
+      # PR 이 이 워크플로를 바꾸면 action 이 실행 없이 정상 종료한다 → 그때는 conclusion 이 비어 있으므로 실패시키지 않고 알린다. merge 게이트는 요약이 없으니 그대로 막는다.
+      # conclusion 이 비는 조건은 고정한 action 버전의 동작이다 → action 을 올릴 때 다시 확인한다.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          CONCLUSION: ${{ steps.claude.outputs.conclusion }}
+        run: |
+          if [ -z "$CONCLUSION" ]; then echo "::notice::action 이 실행을 건너뜀(워크플로 변경 PR) → 리뷰 요약 없음. merge 뒤 다음 PR 에서 요약이 생기는지 확인한다"; exit 0; fi
+          n=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq "[.[] | select(.user.type == \"Bot\" and .performed_via_github_app.slug == \"claude\" and (.body | startswith(\"HEAD: $SHA\")))] | length" | awk '{s += $1} END {print s + 0}')
+          [ "$n" -gt 0 ] || { echo "::error::현재 head($SHA) 의 리뷰 요약이 없음 → 리뷰 실패"; exit 1; }

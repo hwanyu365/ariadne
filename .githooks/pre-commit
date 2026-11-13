@@ -1,0 +1,9 @@
+#!/bin/sh
+# git 이 커밋을 만들기 직전, 커밋되는 작업 트리에서 실행한다 → 명령 형태·작업 디렉터리와 무관하게 그 트리의 비밀 파일과 검증 기록을 본다.
+# core.hooksPath 는 .claude/hooks/hooks-path.sh 가 설정한다. 건너뛰는 명령(--no-verify 등)은 .claude/settings.json deny 가 막는다.
+top=$(git rev-parse --show-toplevel) || exit 1
+r="$top/.github/secret-files.regex"
+[ -s "$r" ] || { echo "$r 없음 → 커밋 차단" >&2; exit 1; }
+f=$({ git -c core.quotePath=false diff --cached --name-only --diff-filter=d; git -c core.quotePath=false ls-files -mo --exclude-standard; } | grep -Ef "$r" | grep -vE '\.example$' | sort -u)
+[ -z "$f" ] || { echo "비밀 파일이 stage 됐거나 커밋 후보임 → 커밋 차단 (.github/secret-files.regex): $f" >&2; exit 1; }
+exec sh "$top/.claude/hooks/verify.sh" --check
