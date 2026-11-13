@@ -19,7 +19,10 @@
       "Bash(git switch:*)",
       "Bash(git worktree add:*)",
       "Bash(gh pr create --draft:*)",
-      "Bash(gh pr comment:*)"
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr ready:*)",
+      "Bash(gh pr merge --squash:*)",
+      "Bash(git worktree remove:*)"
     ],
     "deny": [
       "Read(.env)",
