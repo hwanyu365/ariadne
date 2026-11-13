@@ -44,8 +44,6 @@ jobs:
         uses: anthropics/claude-code-action@9eb012b6d0900c2b9eede65ee1758cec4d2973e9 # v1.0.270
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # 리뷰 런타임 동작(도구 호출·거부)을 관측하는 동안만 켠다. public 저장소라 실행 로그가 공개된다.
-          show_full_output: true
           # 파일 도구가 저장소 밖(러너의 자격 파일, /proc 의 환경 변수)을 읽지 못하게 한다.
           settings: '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
           prompt: |
