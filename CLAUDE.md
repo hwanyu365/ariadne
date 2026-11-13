@@ -142,6 +142,7 @@ npm run verify
   - `gh pr merge` 직전 hook(`.claude/hooks/merge-gate.sh`)이 CI 통과, 현재 head 의 리뷰 요약, Blocking 0건, `--match-head-commit` 을 확인하고 아니면 막는다.
     - gh 명령에 merge 글자가 보이면 `gh pr merge` 이거나 허용 하위 명령이어야 한다. 그 밖의 명령(허용 명령 `git`·`echo`·`grep` 등 제외)은 낱말 `merge` 또는 `gh…merge` 가 보이면 막는다. gh 하위 명령 자리의 확장과 gh 가 보이는 해석 실패도 막는다.
     - 막지 못하는 범위: 스크립트 파일·gh alias 안의 merge, 글자를 감춘 merge, REST API 직접 호출(`curl … /pulls/N/merge` 등). 브랜치 보호(CI 필수)가 있으면 그것이 최종 경계이고, 없는 저장소는 이 게이트가 유일한 경계다.
+    - 게이트는 merge 대상·head 만 판정하고 `gh pr merge` 의 다른 플래그(`--admin`·`--auto` 등)는 거르지 않는다 → allow 의 `gh pr merge --squash:*` 도 뒤에 붙는 플래그를 묻지 않고 통과시킨다. `--admin` 은 `enforce_admins` 가 서버에서 거부한다.
 - **코드 변경은 세션이 직접 커밋한다. `@claude` 에게 맡기지 않는다.**
   - `claude-code-action` 의 push 는 actor 가 bot 으로 기록된다 → 워크플로가 승인 대기가 되고 리뷰는 bot actor 로 거부된다. 저장소 Actions 승인 정책을 느슨하게 해도 그대로다.
   - 커밋 author 는 `claude[bot]` 으로 찍히지만 그 주소의 ID 는 bot 계정의 것이다 → author 로 actor 를 짐작할 수 없다.
