@@ -49,7 +49,7 @@ EOS
 [ -n "$found" ] || pass
 
 # 인자는 찾은 단순 명령의 낱말에서 읽는다 → 주석·따옴표 안의 같은 글자가 대상이 되지 않는다.
-n=""; mh=""; skip=""; want=""
+n=""; mh=""; skip=""; want=""; sq=""
 old=$IFS; IFS=$us; set -f; set -- $margs; set +f; IFS=$old
 for a in "$@"; do
   if [ -n "$skip" ]; then skip=""; continue; fi
@@ -59,7 +59,11 @@ for a in "$@"; do
     --match-head-commit=*) mh=${a#*=} ;;
     -R|--repo|-R*|--repo=*) deny "다른 저장소의 PR 은 검사하지 않음" ;;
     -t|--subject|-b|--body|-F|--body-file|-A|--author-email) skip=1 ;;
-    -*) ;;
+    --subject=*|--body=*|--body-file=*|--author-email=*) ;;
+    -s|--squash) sq=1 ;;
+    -d|--delete-branch) ;;
+    # 허용 목록 밖의 플래그는 판정을 무르거나(--admin 은 브랜치 보호를 건너뜀) 판정과 merge 시점을 떼어 놓는다(--auto)
+    -*) deny "허용하지 않는 gh pr merge 플래그: $a (허용: -s -d --match-head-commit -t -b -F -A)" ;;
     *)
       [ -z "$n" ] || deny "대상 PR 이 둘 이상임: $n $a"
       case "$a" in
@@ -68,6 +72,7 @@ for a in "$@"; do
       esac ;;
   esac
 done
+[ -n "$sq" ] || deny "squash 가 아닌 merge (--squash 를 붙인다)"
 [ "$mode" = --parse ] && { echo "${n:--} ${mh:--}"; exit 0; }
 
 cd "$(git rev-parse --show-toplevel)" || deny "git 저장소가 아님"
