@@ -2,7 +2,7 @@
 
 페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 데스크톱 도구
 
-이 저장소는 ADD(Agent Driven Development)로 개발한다.
+이 저장소는 agent 가 SDD(Spec-Driven Development) + TDD 로 개발한다.
 사람은 요구사항·결정·리뷰를 맡고, agent 는 스펙·테스트·구현·검증·PR 을 맡는다.
 
 ## 절차 도구
@@ -154,22 +154,7 @@ npm run verify
   - 작업 품질과 무관한 제약이다. `@claude` 는 이슈·PR 에서 리뷰와 질의응답만 맡고, `claude.yml` 이 커밋·push 를 막는다.
 - **후속으로 미룬 것과 확인하지 못한 것은 merge 전에 이슈로 등록한다.** 세션은 끝나면 사라지고 handoff 는 로컬에만 남으므로, 다른 사람·다른 기기와 공유되는 자리는 이슈뿐이다.
   - 미루는 것이 기본은 아니다. 등록 대상·적을 내용은 `/adk:ship` 3-1 을 따른다.
-- `main` 은 보호 브랜치다. `enforce_admins` 가 켜져 있어 관리자 권한으로도 아래를 건너뛰고 push·merge 할 수 없다.
-  - CI `verify`·Claude 리뷰 `review` 통과와 PR 경유가 필수다 → `main` 직접 push 는 거부된다.
-    - `review` 는 dependabot·fork PR 에서 job 이 건너뛰어지고, 건너뛴 job 은 필수 check 를 통과한 것으로 친다.
-  - 리뷰 승인은 0건이어도 merge 할 수 있다. 단독 저장소라 승인자를 둘 수 없다.
-  - `main` 에 대한 force push 와 `main` 삭제는 금지다.
-  - 올리는 방식은 squash merge 로 한다. 설정은 rebase·merge commit 도 열어 두지만 쓰지 않는다 → PR 의 커밋이나 merge commit 이 `main` 에 남는다.
-  - 리뷰 지적은 조사해 사실인 것만 반영하고, 반영하지 않은 것은 근거를 남긴다. 미해결 대화가 merge 를 막지는 않는다.
-    - 막게 하면(`required_conversation_resolution`) 지적 하나하나가 차단 요건이 되고, 반영 push 가 다시 리뷰를 깨워 라운드가 끝나지 않는다.
-  - 브랜치가 최신 `main` 이 아니어도 merge 된다 (브랜치 보호 `required_status_checks.strict` 와 ruleset 의 `strict_required_status_checks_policy` 둘 다 꺼짐) → 다른 PR 이 먼저 merge 될 때마다 갱신·CI 재실행을 반복하지 않는다.
-    - 잃는 보호: PR 의 CI 는 PR 브랜치를 검증한다 → merge 결과(`main` + PR)는 merge 뒤 `main` push CI 가 처음 검증한다. merge 뒤 그 실행이 실패하면 고치는 PR 을 먼저 올린다.
-    - **상태를 미리 조회해 분기하지 않는다. `gh pr merge` 의 거부(충돌 등)가 신호다.** 조회로 판정하면 조회 실패(권한 부족, 보호 규칙 없음)와 거부 사유를 구분하는 분기가 또 필요해진다.
-    - 거부되면 `gh pr update-branch {PR번호}` 로 갱신하고 이어서 `git pull --ff-only` 로 로컬을 맞춘다 → 원격만 바뀌므로 이후 작업이 낡은 로컬 위에 쌓인다.
-    - 갱신 뒤의 리뷰 반영은 그 위에 새 커밋으로 올린다 → squash merge 라 갱신이 만든 merge commit 은 `main` 에 남지 않는다.
-    - `gh pr checks {PR번호}` 의 `verify`·`review` 행이 통과로 바뀌면 다시 merge 한다. 필수가 아닌 체크의 실패는 판정에 넣지 않는다.
-    - `verify`·`review` 가 시작되지 않거나 pending 에서 멈추면 merge 하지 않고 소유자에게 알린다 → push 주체에 따라 트리거되지 않거나 승인 대기가 된다.
-    - 두 번째 merge 도 거부되면 사유를 읽고 소유자에게 알린다. 같은 명령을 반복하지 않는다.
+- `main` 브랜치 보호: 저장소가 지원하면 CI 필수, PR 로만 merge 로 둔다. private 무료 플랜처럼 지원하지 않으면 두지 않는다 → merge 조건은 merge 게이트 hook 이 확인한다.
 
 ## 문서·주석
 
