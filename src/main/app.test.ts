@@ -47,7 +47,7 @@ const fill = (win: BrowserWindow, values: Record<string, string>) => win.webCont
   }
 })()`);
 
-test('windowRunsScrapeAndShowsProgress', async () => {
+test('TC#43 windowRunsScrapeAndShowsProgress', async () => {
   const d = tempDir();
   const win = await open();
   try {
@@ -64,7 +64,7 @@ test('windowRunsScrapeAndShowsProgress', async () => {
   }
 });
 
-test('windowRejectsBadInputBeforeStart', async () => {
+test('TC#42 windowRejectsBadInputBeforeStart', async () => {
   const win = await open();
   try {
     await fill(win, { url: '', sel: '', next: '' });
@@ -77,7 +77,7 @@ test('windowRejectsBadInputBeforeStart', async () => {
   }
 });
 
-test('windowRestoresSavedInputs', async () => {
+test('TC#48 windowRestoresSavedInputs', async () => {
   // 입력은 바뀔 때마다 저장되고 다음 창에 채워진다.
   const first = await open();
   try {
@@ -97,7 +97,7 @@ test('windowRestoresSavedInputs', async () => {
   }
 });
 
-test('doubleStartKeepsRunState', async () => {
+test('TC#44 doubleStartKeepsRunState', async () => {
   // 응답을 기다리는 사이에 다시 눌러도 진행 중인 수집의 로그와 상태를 지우지 않는다.
   const d = tempDir();
   const win = await open();
@@ -112,7 +112,7 @@ test('doubleStartKeepsRunState', async () => {
   }
 });
 
-test('closingWindowStopsRun', async () => {
+test('TC#44 closingWindowStopsRun', async () => {
   // 창이 사라지면 결과를 받을 곳이 없다 → 수집을 멈추고 다음 창에서 다시 시작할 수 있다.
   const d = tempDir();
   for (let i = 1; i <= 20; i++) {
@@ -144,7 +144,7 @@ test('closingWindowStopsRun', async () => {
   assert.ok(fs.readdirSync(path.join(d, 'out')).length < 20, '창을 닫은 뒤에도 끝까지 받았다');
 });
 
-test('windowShowsImmediateFailure', async () => {
+test('TC#45 windowShowsImmediateFailure', async () => {
   // 엔진이 곧바로 실패해 종료 알림이 시작 응답보다 먼저 와도 화면이 '실행 중' 으로 굳지 않는다.
   const d = tempDir();
   fs.writeFileSync(path.join(d, 'blocker'), '');      // 폴더가 있어야 할 자리에 파일 → 저장 폴더를 만들지 못한다
@@ -161,7 +161,7 @@ test('windowShowsImmediateFailure', async () => {
   }
 });
 
-test('mainWindowStaysOnItsOwnPage', async () => {
+test('TC#51 mainWindowStaysOnItsOwnPage', async () => {
   // 화면 창은 앱이 가진 파일만 연다 → 새 창이나 다른 문서로 넘어가 preload 통로를 내주지 않는다.
   const { BrowserWindow } = await import('electron');
   const win = await open();
@@ -178,7 +178,7 @@ test('mainWindowStaysOnItsOwnPage', async () => {
 
 const js = <T = unknown>(win: BrowserWindow, code: string) => win.webContents.executeJavaScript(code) as Promise<T>;
 
-test('windowMarksInvalidField', async () => {
+test('TC#42 windowMarksInvalidField', async () => {
   // 입력 오류는 해당 입력란에 표시되고 포커스가 그 칸으로 간다. 접힌 고급 옵션은 펼친다.
   const win = await open();
   try {
@@ -194,7 +194,7 @@ test('windowMarksInvalidField', async () => {
   }
 });
 
-test('windowGuidesBeforeFirstRun', async () => {
+test('TC#47 windowGuidesBeforeFirstRun', async () => {
   // 실행 전에는 빈 로그 자리에 안내가 보이고, 실행하면 사라진다.
   const d = tempDir();
   const win = await open();
@@ -209,7 +209,7 @@ test('windowGuidesBeforeFirstRun', async () => {
   }
 });
 
-test('windowSummarizesResult', async () => {
+test('TC#45 windowSummarizesResult', async () => {
   // 끝나면 결과·페이지 수·멈춘 사유를 요약하고, 받은 파일이 있으면 폴더 열기를 둔다. 수집 중에는 진행 막대가 보인다.
   const d = tempDir();
   const win = await open();
@@ -233,7 +233,7 @@ test('windowSummarizesResult', async () => {
   }
 });
 
-test('windowProgressUsesMaxPages', async () => {
+test('TC#43 windowProgressUsesMaxPages', async () => {
   // 최대 페이지가 있으면 받은 비율을 보인다.
   const d = tempDir();
   const win = await open();
@@ -248,7 +248,7 @@ test('windowProgressUsesMaxPages', async () => {
   }
 });
 
-test('windowLogKeepsRecentLinesAndMarksLevels', async () => {
+test('TC#46 windowLogKeepsRecentLinesAndMarksLevels', async () => {
   // 화면의 로그는 최근 2000줄만 두고, 경고·실패·완료 줄은 색 외에 줄 앞 표시로도 구분한다.
   const win = await open();
   try {
@@ -264,7 +264,7 @@ test('windowLogKeepsRecentLinesAndMarksLevels', async () => {
   }
 });
 
-test('windowNotifiesWhenRunEndsUnfocused', async () => {
+test('TC#50 windowNotifiesWhenRunEndsUnfocused', async () => {
   // 창을 보고 있지 않을 때 수집이 끝나면 OS 알림으로 결과를 알린다. probe 는 알리지 않는다.
   const d = tempDir();
   const win = await open();
@@ -286,7 +286,7 @@ test('windowNotifiesWhenRunEndsUnfocused', async () => {
   }
 });
 
-test('windowFillsSitePresetForAnotherHost', async () => {
+test('TC#49 windowFillsSitePresetForAnotherHost', async () => {
   // 수집을 시작한 호스트의 셀렉터를 기억했다가, URL 을 그 호스트로 바꾸면 채운다. 같은 호스트 안에서는 덮지 않는다.
   const d = tempDir();
   fixture(d);
@@ -312,5 +312,50 @@ test('windowFillsSitePresetForAnotherHost', async () => {
   } finally {
     win.destroy();
     await site.close();
+  }
+});
+
+test('TC#46 windowShowsPageTextAsPlainText', async () => {
+  const win = await open();
+  try {
+    win.webContents.send('run:log', { text: '중단: <img id=evil src=x>', level: 'info', progress: null });
+    win.webContents.send('run:done', { stopped: false });
+    await until<boolean>(win, `!document.querySelector('#result').hidden`, v => v, 5000);
+    assert.equal(await js(win, `document.querySelectorAll('#log img, #result img, #announce img').length`), 0);
+    assert.match(await js<string>(win, `document.querySelector('#log').textContent`), /<img id=evil/);
+    assert.match(await js<string>(win, `document.querySelector('#result-text').textContent`), /<img id=evil/);
+  } finally {
+    win.destroy();
+  }
+});
+
+test('TC#43 windowShowsRunningStateWithoutMax', async () => {
+  const d = tempDir();
+  const win = await open();
+  try {
+    await fill(win, { url: fixture(d), sel: '#c', next: '.next', prefix: path.join(d, 'out', 'p'), max: '0' });
+    const during = await js<[string, boolean, boolean]>(win, `document.querySelector('#run').click();
+      [document.querySelector('#st-state').textContent, document.querySelector('#progress').hidden, document.querySelector('#progress').hasAttribute('value')]`);
+    assert.match(during[0], /수집 중/);
+    assert.deepEqual(during.slice(1), [false, false]);
+    await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패/.test(v));
+  } finally {
+    win.destroy();
+  }
+});
+
+test('TC#53 keyboardStartsAndStopsRun', async () => {
+  const d = tempDir();
+  const win = await open();
+  try {
+    await fill(win, { url: fixture(d), sel: '#c', next: '.next', prefix: path.join(d, 'out', 'p'), delay: '1000' });
+    await js(win, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }))`);
+    await until<string>(win, `document.querySelector('#log').textContent`, v => v.includes('[1]'));
+    await js(win, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+    const state = await until<string>(win, `document.querySelector('#st-state').textContent`, v => /완료|실패|중지/.test(v));
+    assert.match(state, /중지/);
+  } finally {
+    await fill(win, { delay: '0' });
+    win.destroy();
   }
 });

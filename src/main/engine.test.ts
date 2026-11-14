@@ -107,37 +107,37 @@ async function runPage(raw: Buffer, opts: ScrapeOptions = {}) {
   }
 }
 
-test('linkPagination', async () => {
+test('TC#1 linkPagination', async () => {
   const { n, names, texts } = await run(fixtureLink);
   assert.equal(n, 3);
   assert.deepEqual(names, ['p_0001.txt', 'p_0002.txt', 'p_0003.txt']);
   assert.deepEqual(texts, ['본문 1', '본문 2', '본문 3']);
 });
 
-test('spaPagination', async () => {
+test('TC#1 spaPagination', async () => {
   const { n, texts } = await run(fixtureSpa);
   assert.equal(n, 3);
   assert.deepEqual(texts, ['본문 1', '본문 2', '본문 3']);
 });
 
-test('maxPages', async () => {
+test('TC#8 maxPages', async () => {
   const { n, names } = await run(fixtureLink, { maxPages: 2 });
   assert.equal(n, 2);
   assert.deepEqual(names, ['p_0001.txt', 'p_0002.txt']);
 });
 
-test('disabledNextFollowsHref', async () => {
+test('TC#4 disabledNextFollowsHref', async () => {
   const { n, texts } = await run(fixtureDisabledButHref);
   assert.equal(n, 3);
   assert.deepEqual(texts, ['본문 1', '본문 2', '본문 3']);
 });
 
-test('digitsAndStart', async () => {
+test('TC#14 digitsAndStart', async () => {
   const { names } = await run(fixtureLink, { digits: 3, start: 65 });
   assert.deepEqual(names, ['p_065.txt', 'p_066.txt', 'p_067.txt']);
 });
 
-test('clickWaitsUntilNextReceivesIt', async () => {
+test('TC#2 clickWaitsUntilNextReceivesIt', async () => {
   // 로딩 막이 잠시 next 를 덮는 동안 누르면 막이 클릭을 받는다 → 그 자리에 next 가 드러날 때 누른다.
   const { n } = await run(d => {
     write(path.join(d, 'm1.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" href="m2.html">next</a>
@@ -149,16 +149,16 @@ test('clickWaitsUntilNextReceivesIt', async () => {
   assert.equal(n, 2);
 });
 
-test('missingNextSelector', async () => {
+test('TC#7 missingNextSelector', async () => {
   // next 셀렉터가 안 맞으면 1페이지만 받고 이유를 로그로 남긴다.
   const d = tempDir();
   const logs: string[] = [];
   const n = await scrape(fixtureLink(d), '#c', '.nope', path.join(d, 'out', 'p'), { timeout: 3000, onLog: m => logs.push(m) });
   assert.equal(n, 1);
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('.nope')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('.nope') && l.includes('probe')), logs.join('\n'));
 });
 
-test('stopsAfterCurrentPageWhenAborted', async () => {
+test('TC#12 stopsAfterCurrentPageWhenAborted', async () => {
   // 중지는 현재 페이지를 마친 뒤 반영한다. 그때까지 받은 파일은 남는다.
   const ctl = new AbortController();
   const logs: string[] = [];
@@ -171,27 +171,29 @@ test('stopsAfterCurrentPageWhenAborted', async () => {
   assert.ok(logs.some(l => l.includes('사용자 중지')), logs.join('\n'));
 });
 
-test('titleHeader', async () => {
+test('TC#16 titleHeader', async () => {
   const { n, texts } = await run(fixtureLink, { titleSel: '#tt', digits: 3, start: 1920 });
   assert.equal(n, 3);
   assert.deepEqual(texts[0].split('\n'), ['1920화. 제목 1', '', '본문 1']);
   assert.ok(texts[2].startsWith('1922화. 제목 3'), texts[2]);
 });
 
-test('titleSelectorMissing', async () => {
-  const { n, texts } = await run(fixtureLink, { titleSel: '#nope' });
+test('TC#16 titleSelectorMissing', async () => {
+  const logs: string[] = [];
+  const { n, texts } = await run(fixtureLink, { titleSel: '#nope', onLog: m => logs.push(m) });
   assert.equal(n, 3);
   assert.deepEqual(texts[0].split('\n'), ['1화.', '', '본문 1']);
+  assert.ok(logs.some(l => l.includes('경고') && l.includes('#nope')), logs.join('\n'));
 });
 
-test('imageModeSavesEveryPage', async () => {
+test('TC#24 imageModeSavesEveryPage', async () => {
   const { pages, names, blobs, log } = await runImages('src');
   assert.equal(pages, 3, log);
   assert.deepEqual(names, [1, 2, 3].flatMap(p => [1, 2].map(i => `p_${String(p).padStart(4, '0')}_${String(i).padStart(3, '0')}.png`)));
   assert.ok(blobs.every(b => b.equals(PNG)), blobs.map(b => b.length).join(','));
 });
 
-test('imageModeReadsDataSrc', async () => {
+test('TC#25 imageModeReadsDataSrc', async () => {
   // 주소가 data-src 에만 있어도 받는다. src 가 비어 크기가 0 인 img 도 대상이다.
   const { pages, names, blobs, log } = await runImages('data-src', 2);
   assert.equal(pages, 2, log);
@@ -199,13 +201,13 @@ test('imageModeReadsDataSrc', async () => {
   assert.ok(blobs.every(b => b.equals(PNG)));
 });
 
-test('imageModeMaxPages', async () => {
+test('TC#8 imageModeMaxPages', async () => {
   const { pages, names } = await runImages('src', 3, { maxPages: 1 });
   assert.equal(pages, 1);
   assert.deepEqual(names, ['p_0001_001.png', 'p_0001_002.png']);
 });
 
-test('charsetUndeclaredUtf8Warns', async () => {
+test('TC#20 charsetUndeclaredUtf8Warns', async () => {
   // 선언 없는 UTF-8 은 깨진 채 받아진다 → 조용히 끝나지 않고 로그로 알린다.
   const { n, texts, logs } = await runUndeclared();
   assert.equal(n, 2);
@@ -213,7 +215,7 @@ test('charsetUndeclaredUtf8Warns', async () => {
   assert.ok(logs.some(l => l.includes('windows-1252')), logs.join('\n'));
 });
 
-test('charsetWarnsWhenLaterPageUndeclared', async () => {
+test('TC#20 charsetWarnsWhenLaterPageUndeclared', async () => {
   // 첫 페이지가 정상이어도 이후 페이지에서 추정이 틀리면 한 번 알린다.
   const d = tempDir();
   write(path.join(d, 'a.html'), Buffer.from('<meta charset="utf-8"><div id=c>본문 1</div><a class="next" href="b.html">n</a>'));
@@ -229,7 +231,7 @@ test('charsetWarnsWhenLaterPageUndeclared', async () => {
   assert.equal(logs.filter(l => l.includes('windows-1252')).length, 1, logs.join('\n'));
 });
 
-test('charsetForcedReadsUndeclaredUtf8', async () => {
+test('TC#21 charsetForcedReadsUndeclaredUtf8', async () => {
   // 인코딩을 지정하면 리다이렉트와 링크 이동을 거쳐도 모든 페이지를 그 인코딩으로 읽는다.
   const { n, texts, logs } = await runUndeclared({ charset: 'utf-8' });
   assert.equal(n, 2);
@@ -237,7 +239,7 @@ test('charsetForcedReadsUndeclaredUtf8', async () => {
   assert.ok(!logs.some(l => l.includes('windows-1252')), logs.join('\n'));
 });
 
-test('charsetAliasAppliedNotWarned', async () => {
+test('TC#21 charsetAliasAppliedNotWarned', async () => {
   // 브라우저가 다른 이름으로 정규화해 적용한 지정은 경고하지 않는다.
   const cases: [string, Buffer, string][] = [
     ['gb2312', Buffer.from([0xd6, 0xd0, 0xce, 0xc4, 0x20, 0xb1, 0xbe, 0xce, 0xc4]), '中文 本文'],
@@ -251,7 +253,7 @@ test('charsetAliasAppliedNotWarned', async () => {
   }
 });
 
-test('charsetWarnsWhenUtf8ReadAsOther', async () => {
+test('TC#20 charsetWarnsWhenUtf8ReadAsOther', async () => {
   // UTF-8 바이트를 다른 인코딩으로 읽으면 그 인코딩이 무엇이든 알린다.
   const raw = Buffer.from('<meta charset="euc-kr"><div id=c>érkezik 가나다</div>');
   let { got, logs } = await runPage(raw);
@@ -264,7 +266,7 @@ test('charsetWarnsWhenUtf8ReadAsOther', async () => {
   assert.ok(logs.some(l => l.includes('경고') && l.includes('euc-kr')), logs.join('\n'));
 });
 
-test('charsetForcedOverridesWrongDeclaration', async () => {
+test('TC#21 charsetForcedOverridesWrongDeclaration', async () => {
   // EUC-KR 바이트를 utf-8 로 잘못 선언한 페이지도 지정한 인코딩으로 읽는다. 원본 바이트가 그대로 넘어가야 맞는다.
   const eucKr = Buffer.from([0xba, 0xbb, 0xb9, 0xae, 0x20, 0xb0, 0xa1, 0xb3, 0xaa, 0xb4, 0xd9]);   // "본문 가나다"
   const d = tempDir();
@@ -284,7 +286,7 @@ test('charsetForcedOverridesWrongDeclaration', async () => {
   assert.equal(texts['euc-kr'], '본문 가나다');
 });
 
-test('charsetForcedLeavesIframeAlone', async () => {
+test('TC#22 charsetForcedLeavesIframeAlone', async () => {
   // 지정은 메인 문서에만 건다. 인코딩이 다른 iframe 까지 덮으면 그쪽이 깨진다.
   const d = tempDir();
   write(path.join(d, 'outer.html'), Buffer.from('<body><div id=c>본문 가나다</div><iframe src="inner.html"></iframe></body>'));
@@ -306,7 +308,7 @@ test('charsetForcedLeavesIframeAlone', async () => {
   }
 });
 
-test('charsetFailureFallsBackToOriginal', async () => {
+test('TC#21 charsetFailureFallsBackToOriginal', async () => {
   // 가로챈 응답을 바꾸다 실패해도 요청을 풀어 원래 응답으로 로드한다. 매달리면 수집이 타임아웃으로 끝난다.
   const { n, texts } = await runUndeclared({
     charset: 'utf-8',
@@ -328,7 +330,7 @@ const cookieHandler: Handler = (req, res) => {
   res.end(Buffer.from(body));
 };
 
-test('charsetForcedKeepsCookies', async () => {
+test('TC#21 charsetForcedKeepsCookies', async () => {
   // 지정해도 응답이 내린 쿠키가 모두 남아 다음 페이지 요청에 실린다.
   const d = tempDir();
   const srv = await serve(d, cookieHandler);
@@ -340,13 +342,13 @@ test('charsetForcedKeepsCookies', async () => {
   assert.equal(read(d, 'p_0002.txt'), 'a=1; b=2');
 });
 
-test('charsetForcedReadsGzipResponse', async () => {
+test('TC#21 charsetForcedReadsGzipResponse', async () => {
   const { n, texts } = await runUndeclared({ charset: 'utf-8' }, staticFile(true));
   assert.equal(n, 2);
   assert.deepEqual(texts, ['본문 1 가나다', '본문 2 가나다']);
 });
 
-test('probeReportsCharset', async () => {
+test('TC#33 probeReportsCharset', async () => {
   // probe 는 추정 인코딩을 보여 주고, 지정하면 미리보기부터 바로 읽힌다.
   const d = tempDir();
   writeUndeclaredUtf8(d);
@@ -366,7 +368,7 @@ test('probeReportsCharset', async () => {
   assert.ok(!forced.some(l => l.includes('경고')), forced.join('\n'));
 });
 
-test('probeListsCandidatesAndIframes', async () => {
+test('TC#32 probeListsCandidatesAndIframes', async () => {
   const d = tempDir();
   write(path.join(d, 'p.html'), `<meta charset="utf-8"><body><div id=c>${'본문 '.repeat(80)}</div>
 <a class="next" href="p2.html">다음</a><iframe src="about:blank"></iframe></body>`);
@@ -379,7 +381,7 @@ test('probeListsCandidatesAndIframes', async () => {
   assert.match(all, /주의: iframe 1개/);
 });
 
-test('newWindowsAreDenied', async () => {
+test('TC#29 newWindowsAreDenied', async () => {
   // 수집은 원래 탭만 읽는다 → target=_blank 링크와 window.open 이 창을 만들지 않는다.
   const d = tempDir();
   write(path.join(d, 'w.html'), `<meta charset="utf-8"><body><div id=c>본문</div>
@@ -396,14 +398,14 @@ test('newWindowsAreDenied', async () => {
   }
 });
 
-test('charsetNameCheckedAtEngineEntry', async () => {
+test('TC#23 charsetNameCheckedAtEngineEntry', async () => {
   // 호출자가 검증을 빠뜨려도 응답 헤더에 모르는 이름이 들어가지 않는다.
   const d = tempDir();
   for (const bad of ['u8', 'utf-8\r\nx-evil: 1'])
     await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { charset: bad, ...quiet }), /인코딩/, bad);
 });
 
-test('imageModeSkipsStalledImage', async () => {
+test('TC#27 imageModeSkipsStalledImage', async () => {
   // 응답이 멈춘 이미지 한 장 때문에 수집이 멈추지 않는다 → 건너뛰고 나머지와 다음 페이지를 받는다.
   const d = tempDir();
   writeImagePages(d, 2, 'src');
@@ -421,7 +423,7 @@ test('imageModeSkipsStalledImage', async () => {
   assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('b1.png')), logs.join('\n'));
 });
 
-test('charsetNotJudgedFromPreviousDocument', async () => {
+test('TC#20 charsetNotJudgedFromPreviousDocument', async () => {
   // 오류 응답처럼 바이트를 남기지 않는 문서에서 지난 문서의 바이트로 판정하지 않는다.
   const errorPage: Handler = (req, res) => {
     if ((req.url ?? '').endsWith('a.html')) {
@@ -446,7 +448,7 @@ test('charsetNotJudgedFromPreviousDocument', async () => {
   assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 404')), logs.join('\n'));
 });
 
-test('charsetForcedAcrossSites', async () => {
+test('TC#21 charsetForcedAcrossSites', async () => {
   // 다른 사이트로 넘어가면 렌더러 프로세스가 바뀐다 → 그 뒤 문서에도 지정이 적용된다.
   const d = tempDir();
   writeUndeclaredUtf8(d);
@@ -462,7 +464,7 @@ test('charsetForcedAcrossSites', async () => {
   assert.deepEqual(outFiles(d).map(f => read(d, f)), ['본문 1 가나다', '본문 2 가나다']);
 });
 
-test('remotePageCannotPointAtLocalFiles', async () => {
+test('TC#30 remotePageCannotPointAtLocalFiles', async () => {
   // 이미지 주소와 next 주소는 원격 페이지가 정한다 → 웹 페이지가 로컬 파일을 받게 하거나 그쪽으로 넘기지 못한다.
   const d = tempDir();
   const secret = path.join(d, 'secret.png');
@@ -483,7 +485,7 @@ test('remotePageCannotPointAtLocalFiles', async () => {
   assert.ok(logs.some(l => l.includes('중단') && l.includes('따라가지 않습니다')), logs.join('\n'));
 });
 
-test('permissionsAndDownloadsDenied', async () => {
+test('TC#29 permissionsAndDownloadsDenied', async () => {
   // 수집 창의 원격 페이지는 권한을 얻거나 파일을 내려받지 못한다.
   const d = tempDir();
   write(path.join(d, 'x.bin'), 'payload');
@@ -508,7 +510,7 @@ test('permissionsAndDownloadsDenied', async () => {
   }
 });
 
-test('stopsWithReasonWhenNextStaysCovered', async () => {
+test('TC#6 stopsWithReasonWhenNextStaysCovered', async () => {
   // next 를 계속 다른 요소가 덮고 있으면 덮은 요소를 누르지 않고 이유를 남기고 멈춘다.
   const d = tempDir();
   const logs: string[] = [];
@@ -519,7 +521,7 @@ test('stopsWithReasonWhenNextStaysCovered', async () => {
   assert.ok(logs.some(l => l.includes('중단') && l.includes('div#veil')), logs.join('\n'));
 });
 
-test('stopsWithReasonOnBrokenNextHref', async () => {
+test('TC#6 stopsWithReasonOnBrokenNextHref', async () => {
   // 숨겨진 next 의 href 를 해석할 수 없으면 예외로 끝내지 않고 이유를 남긴다.
   const d = tempDir();
   const logs: string[] = [];
@@ -529,7 +531,7 @@ test('stopsWithReasonOnBrokenNextHref', async () => {
   assert.ok(logs.some(l => l.includes('중단') && l.includes('해석할 수 없습니다')), logs.join('\n'));
 });
 
-test('reachableAllowsWebAndSameSchemeOnly', () => {
+test('TC#30 reachableAllowsWebAndSameSchemeOnly', () => {
   // 원격 페이지가 정한 주소는 웹 주소이거나 지금 페이지와 같은 스킴일 때만 따라간다.
   const cases: [string, string, boolean][] = [
     ['http://a/x.png', 'http://a/p.html', true],
@@ -544,7 +546,7 @@ test('reachableAllowsWebAndSameSchemeOnly', () => {
   for (const [url, page, want] of cases) assert.equal(reachable(new URL(url), page), want, `${url} from ${page}`);
 });
 
-test('stopsWithReasonWhenNextHrefUnreachable', async () => {
+test('TC#30 stopsWithReasonWhenNextHrefUnreachable', async () => {
   // 숨겨진 next 의 주소로 이동하지 못하면 예외로 끝내지 않고 이유를 남긴다.
   const closed = await serve(tempDir());
   await closed.close();                 // 방금 비운 포트 → 연결 거부
@@ -556,7 +558,7 @@ test('stopsWithReasonWhenNextHrefUnreachable', async () => {
   assert.ok(logs.some(l => l.includes('중단') && l.includes('이동하지 못했습니다')), logs.join('\n'));
 });
 
-test('imagePageWithoutAddressesSavesNothing', async () => {
+test('TC#24 imagePageWithoutAddressesSavesNothing', async () => {
   // 주소가 아직 없거나 전부 data: 인 페이지에서 페이지 자체를 이미지로 받지 않는다.
   const d = tempDir();
   write(path.join(d, 'e.html'), '<body><div id=c><img src="data:image/png;base64,AAAA"><img></div><a class="next" aria-disabled="true">n</a></body>');
@@ -581,7 +583,7 @@ async function runLogged(make: (d: string) => string, opts: ScrapeOptions = {}, 
 
 const pageHtml = (body: string, next: string) => `<meta charset="utf-8"><body><div id=c>${body}</div>${next}</body>`;
 
-test('stopsWhenNextReturnsToReceivedPage', async () => {
+test('TC#9 stopsWhenNextReturnsToReceivedPage', async () => {
   // 마지막 페이지의 next 가 처음으로 돌아가면 끝없이 받지 않고 멈춘다.
   const { n, log } = await runLogged(d => {
     write(path.join(d, 'r1.html'), pageHtml('본문 1', '<a class="next" href="r2.html">n</a>'));
@@ -592,7 +594,7 @@ test('stopsWhenNextReturnsToReceivedPage', async () => {
   assert.match(log, /중단: .*이미 받은 페이지/);
 });
 
-test('savesTextAfterItSettles', async () => {
+test('TC#3 savesTextAfterItSettles', async () => {
   // 본문이 나눠 그려지면 다 그려진 값을 저장한다.
   const { texts, log } = await runLogged(d => {
     write(path.join(d, 's.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><button class=next>n</button>
@@ -605,7 +607,7 @@ test('savesTextAfterItSettles', async () => {
   assert.deepEqual(texts, ['본문 1', '본문 2 가 나 다 라'], log);
 });
 
-test('newTabNextFollowsHrefInSameTab', async () => {
+test('TC#5 newTabNextFollowsHrefInSameTab', async () => {
   // 새 탭으로 여는 next 는 창을 만들지 않고 같은 탭에서 그 주소로 넘어간다.
   const { n, texts, log } = await runLogged(d => {
     for (let i = 1; i <= 3; i++)
@@ -616,7 +618,7 @@ test('newTabNextFollowsHrefInSameTab', async () => {
   assert.deepEqual(texts, ['본문 1', '본문 2', '본문 3']);
 });
 
-test('nextInsideHiddenLinkFollowsLinkHref', async () => {
+test('TC#5 nextInsideHiddenLinkFollowsLinkHref', async () => {
   // 셀렉터가 숨긴 링크 안쪽 아이콘을 가리켜도 감싼 링크의 주소로 넘어간다.
   const { n, log } = await runLogged(d => {
     for (let i = 1; i <= 2; i++)
@@ -626,7 +628,7 @@ test('nextInsideHiddenLinkFollowsLinkHref', async () => {
   assert.equal(n, 2, log);
 });
 
-test('coveredNextFollowsHref', async () => {
+test('TC#4 coveredNextFollowsHref', async () => {
   // 다른 요소에 덮여 누를 수 없는 next 도 주소가 있으면 그 주소로 넘어간다.
   const { n, log } = await runLogged(d => {
     write(path.join(d, 'v.html'), `${pageHtml('본문 1', '<a class="next" href="v2.html">next</a>')}<div style="position:fixed;inset:0;background:rgba(0,0,0,.01)"></div>`);
@@ -636,7 +638,7 @@ test('coveredNextFollowsHref', async () => {
   assert.equal(n, 2, log);
 });
 
-test('imageModeChecksResponseIsImage', async () => {
+test('TC#26 imageModeChecksResponseIsImage', async () => {
   // 이미지가 아닌 응답은 건너뛰고, 확장자는 받은 내용으로 정한다.
   const d = tempDir();
   write(path.join(d, 'a.jpg'), PNG);
@@ -661,7 +663,7 @@ test('imageModeChecksResponseIsImage', async () => {
   assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('typed.png')), logs.join('\n'));
 });
 
-test('imageModeKeepsUntypedImageByAddress', async () => {
+test('TC#26 imageModeKeepsUntypedImageByAddress', async () => {
   // 저장소형 CDN 은 이미지를 octet-stream 으로 준다 → 내용으로 못 정해도 주소가 이미지면 받는다.
   const d = tempDir();
   const tiff = Buffer.concat([Buffer.from('49492a00', 'hex'), Buffer.from('fixture')]);
@@ -682,7 +684,7 @@ test('imageModeKeepsUntypedImageByAddress', async () => {
   assert.deepEqual(outFiles(d, /./), ['p_0001_002.jpg'], logs.join('\n'));
 });
 
-test('imageModeReadsLazyAttributesOnce', async () => {
+test('TC#25 imageModeReadsLazyAttributesOnce', async () => {
   // data-original 같은 지연 로딩 속성을 placeholder 보다 먼저 보고, 같은 주소는 한 번만 받는다.
   const d = tempDir();
   write(path.join(d, 'a.png'), PNG);
@@ -698,7 +700,7 @@ test('imageModeReadsLazyAttributesOnce', async () => {
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png'], logs.join('\n'));
 });
 
-test('stopDuringDelayDoesNotTakeAnotherPage', async () => {
+test('TC#12 stopDuringDelayDoesNotTakeAnotherPage', async () => {
   // 페이지 간 대기 중에 누른 중지는 다음 페이지를 받기 전에 반영한다.
   const ctl = new AbortController();
   const began = Date.now();
@@ -712,7 +714,7 @@ test('stopDuringDelayDoesNotTakeAnotherPage', async () => {
   assert.ok(Date.now() - began < 5000, `${Date.now() - began}ms`);
 });
 
-test('stopReasonShowsHttpStatus', async () => {
+test('TC#11 stopReasonShowsHttpStatus', async () => {
   // 넘어간 문서가 HTTP 오류면 타임아웃이 아니라 상태 코드를 사유로 남긴다.
   const d = tempDir();
   const handler: Handler = (req, res) => {
@@ -730,13 +732,13 @@ test('stopReasonShowsHttpStatus', async () => {
   assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 503')), logs.join('\n'));
 });
 
-test('logsLastPageAddressAndNumber', async () => {
+test('TC#13 logsLastPageAddressAndNumber', async () => {
   // 멈추면 마지막으로 받은 페이지의 주소와 번호를 남겨 그 자리에서 이어 받게 한다.
   const { log } = await runLogged(fixtureLink, { start: 10 });
   assert.match(log, /마지막으로 받은 페이지: 12번 file:.*p3\.html/);
 });
 
-test('warnsWhenFirstFileExists', async () => {
+test('TC#15 warnsWhenFirstFileExists', async () => {
   // 같은 저장 위치로 다시 받으면 덮어쓰기 전에 경고한다.
   const d = tempDir();
   const url = fixtureLink(d);
@@ -747,7 +749,7 @@ test('warnsWhenFirstFileExists', async () => {
   assert.ok(logs.some(l => l.startsWith('경고') && l.includes('p_0001.txt') && l.includes('덮어')), logs.join('\n'));
 });
 
-test('coveredHashNextKeepsClickReason', async () => {
+test('TC#6 coveredHashNextKeepsClickReason', async () => {
   // 따라갈 주소가 없는 next 를 누르지 못하면 마지막 페이지로 보지 않고 누르지 못한 이유를 남긴다.
   const { n, log } = await runLogged(d => {
     write(path.join(d, 'k.html'), `${pageHtml('본문 1', '<a class="next" href="#">next</a>')}<div id=veil style="position:fixed;inset:0;background:rgba(0,0,0,.01)"></div>`);
@@ -757,7 +759,7 @@ test('coveredHashNextKeepsClickReason', async () => {
   assert.match(log, /중단: next 를 누르지 못했습니다.*div#veil/);
 });
 
-test('sameTextOnAnotherPageContinues', async () => {
+test('TC#9 sameTextOnAnotherPageContinues', async () => {
   // 다른 주소의 페이지가 앞서 받은 페이지와 본문이 같아도 계속 받는다.
   const bodies = ['본문 1', '(삽화)', '본문 3', '(삽화)', '본문 5'];
   const { n, log } = await runLogged(d => {
@@ -767,7 +769,7 @@ test('sameTextOnAnotherPageContinues', async () => {
   assert.equal(n, 5, log);
 });
 
-test('disabledNextInsideWrapperLinkStops', async () => {
+test('TC#6 disabledNextInsideWrapperLinkStops', async () => {
   // next 가 링크 안의 버튼이면 감싼 링크의 주소로 넘어가지 않는다 → 카드 전체를 감싼 링크는 다음 페이지가 아니다.
   const { n, log } = await runLogged(d => {
     write(path.join(d, 'w1.html'), pageHtml('본문 1', '<a href="w2.html"><button class="next" disabled>n</button></a>'));
@@ -777,7 +779,7 @@ test('disabledNextInsideWrapperLinkStops', async () => {
   assert.equal(n, 1, log);
 });
 
-test('linkRelNextFollowsHref', async () => {
+test('TC#4 linkRelNextFollowsHref', async () => {
   // 화면에 그려지지 않는 <link rel=next> 도 주소가 있으면 그 주소로 넘어간다.
   const { n, log } = await runLogged(d => {
     for (let i = 1; i <= 2; i++)
@@ -787,7 +789,7 @@ test('linkRelNextFollowsHref', async () => {
   assert.equal(n, 2, log);
 });
 
-test('excludeSelectorDropsElementsFromText', async () => {
+test('TC#17 excludeSelectorDropsElementsFromText', async () => {
   // 제외 요소는 보이지 않는 것으로 보고 읽는다 → 나머지 본문의 줄바꿈은 그대로다.
   const { texts, log } = await runLogged(d => {
     write(path.join(d, 'x1.html'), pageHtml('<p>본문 1</p><p class=ad>광고</p><p>끝 1</p>', '<a class="next" href="x2.html">n</a>'));
@@ -798,13 +800,13 @@ test('excludeSelectorDropsElementsFromText', async () => {
   assert.deepEqual(texts, ['본문 1\n\n끝 1'], log);
 });
 
-test('excludeSelectorSyntaxErrorFails', async () => {
+test('TC#18 excludeSelectorSyntaxErrorFails', async () => {
   // 문법이 틀린 제외 셀렉터를 조용히 무시하면 광고가 섞인 채 성공으로 끝난다.
   const d = tempDir();
   await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: '.ad[', ...quiet }));
 });
 
-test('mergeWritesAllPagesToOneFile', async () => {
+test('TC#19 mergeWritesAllPagesToOneFile', async () => {
   // 페이지별 txt 와 함께 받은 본문 전체를 한 파일로도 남긴다. 다시 받으면 새로 쓰고 경고한다.
   const d = tempDir();
   const url = fixtureLink(d);
@@ -817,7 +819,7 @@ test('mergeWritesAllPagesToOneFile', async () => {
   assert.ok(logs.some(l => l.startsWith('경고') && l.includes('p_all.txt')), logs.join('\n'));
 });
 
-test('excludeWorksUnderStrictCsp', async () => {
+test('TC#17 excludeWorksUnderStrictCsp', async () => {
   // 인라인 스타일을 막는 CSP 페이지에서도 제외가 적용된다.
   const d = tempDir();
   const handler: Handler = (_req, res) => {
@@ -833,13 +835,13 @@ test('excludeWorksUnderStrictCsp', async () => {
   assert.equal(read(d, 'p_0001.txt'), '본문');
 });
 
-test('excludeCoveringTargetFails', async () => {
+test('TC#18 excludeCoveringTargetFails', async () => {
   // 제외 셀렉터가 수집 대상이나 그 조상까지 가리면 무엇을 받았는지 알 수 없다 → 실패로 알린다.
   const d = tempDir();
   await assert.rejects(scrape(fixtureLink(d), '#c', '.next', path.join(d, 'out', 'p'), { timeout: 3000, exclude: 'body', ...quiet }), /제외/);
 });
 
-test('probeAppliesExclude', async () => {
+test('TC#34 probeAppliesExclude', async () => {
   // probe 도 수집과 같은 제외를 거쳐 미리보기를 보인다. 대상까지 가리면 알린다.
   const d = tempDir();
   write(path.join(d, 'p.html'), pageHtml('<p>본문</p><p class=ad>광고</p>', ''));
@@ -854,7 +856,7 @@ test('probeAppliesExclude', async () => {
   assert.ok(covered.some(l => l.includes('경고') && l.includes('제외')), covered.join('\n'));
 });
 
-test('mergeAppendsWhenResuming', async () => {
+test('TC#19 mergeAppendsWhenResuming', async () => {
   // 이어 받기(시작 번호 2 이상)는 앞서 합쳐 둔 본문을 지우지 않고 이어 쓴다.
   const d = tempDir();
   fixtureLink(d);
@@ -864,7 +866,7 @@ test('mergeAppendsWhenResuming', async () => {
   assert.equal(read(d, 'p_all.txt'), '본문 1\n\n본문 2\n\n본문 3');
 });
 
-test('excludeCoveringTargetOnLaterPageFails', async () => {
+test('TC#18 excludeCoveringTargetOnLaterPageFails', async () => {
   // 다음 페이지에서 제외가 수집 대상을 가려도 타임아웃으로 감추지 않고 그 사유로 실패한다.
   const d = tempDir();
   write(path.join(d, 'c1.html'), pageHtml('본문 1', '<a class="next" href="c2.html">n</a>'));
@@ -872,7 +874,7 @@ test('excludeCoveringTargetOnLaterPageFails', async () => {
   await assert.rejects(scrape(pathToFileURL(path.join(d, 'c1.html')).href, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 2000, exclude: '.ad', ...quiet }), /제외/);
 });
 
-test('imageRequestCarriesPageAsReferer', async () => {
+test('TC#28 imageRequestCarriesPageAsReferer', async () => {
   // 핫링크를 막는 사이트는 Referer 로 판정한다 → 이미지 요청에 그 이미지가 있던 페이지 주소가 실린다.
   const d = tempDir();
   writeImagePages(d, 1, 'src');
@@ -893,7 +895,7 @@ test('imageRequestCarriesPageAsReferer', async () => {
   assert.deepEqual(referers, [page, page, page, page]);
 });
 
-test('crossOriginImageIsSavedWithOriginReferer', async () => {
+test('TC#28 crossOriginImageIsSavedWithOriginReferer', async () => {
   // 핫링크 차단은 이미지를 다른 서버에 둔 경우다 → 다른 서버의 이미지도 받고, 페이지가 그릴 때와 같은 Referer(origin)를 싣는다.
   const imgDir = tempDir();
   write(path.join(imgDir, 'a.png'), PNG);
@@ -916,7 +918,7 @@ test('crossOriginImageIsSavedWithOriginReferer', async () => {
   assert.deepEqual(referers, [`${site.base}/`, `${site.base}/`]);
 });
 
-test('pageReferrerPolicyDecidesReferer', async () => {
+test('TC#28 pageReferrerPolicyDecidesReferer', async () => {
   // 페이지가 바꾼 Referer 정책(<meta>, 응답 헤더, <img referrerpolicy>)을 따른다 → 브라우저보다 많이 보내지도, 덜 보내 차단되지도 않는다.
   // 모르는 정책 값은 브라우저처럼 건너뛰고 다음 단계(meta → 헤더)를 쓴다.
   const imgDir = tempDir();
@@ -948,7 +950,7 @@ test('pageReferrerPolicyDecidesReferer', async () => {
   assert.deepEqual(outFiles(d, /./), ['h_0001_001.png', 'm_0001_001.png', 'm_0001_002.png']);
 });
 
-test('redirectedImageGetsRefererPerHop', async () => {
+test('TC#28 redirectedImageGetsRefererPerHop', async () => {
   // 이미지 주소가 다른 서버로 리디렉션되면 브라우저처럼 그 서버 기준으로 Referer 를 다시 정한다 → 경로·쿼리가 다른 서버로 새지 않는다.
   const cdnDir = tempDir();
   write(path.join(cdnDir, 'a.png'), PNG);
@@ -976,7 +978,7 @@ test('redirectedImageGetsRefererPerHop', async () => {
   assert.deepEqual(seen, [`${site.base}/`, `${site.base}/`]);
 });
 
-test('refererHookLeavesOtherRequestsAlone', async () => {
+test('TC#28 refererHookLeavesOtherRequestsAlone', async () => {
   // 훅은 수집이 받는 요청의 Referer 만 정한다 → 페이지가 보낸 요청과, 수집 밖의 세션 요청은 그대로 둔다.
   const imgDir = tempDir();
   write(path.join(imgDir, 'a.png'), PNG);
@@ -1012,7 +1014,7 @@ test('refererHookLeavesOtherRequestsAlone', async () => {
   assert.equal(outside, `${site.base}/custom`);
 });
 
-test('errorPageWithSameLayoutIsNotSaved', async () => {
+test('TC#11 errorPageWithSameLayoutIsNotSaved', async () => {
   // 오류 응답이 같은 틀로 본문 자리를 채워도 본문으로 저장하지 않고 상태 코드로 멈춘다.
   const d = tempDir();
   const handler: Handler = (req, res) => {
@@ -1041,20 +1043,20 @@ function fixtureSpaBodies(d: string, bodies: string[], loop = false) {
   return pathToFileURL(path.join(d, 'sb.html')).href;
 }
 
-test('spaKeepsGoingOnRepeatedMiddleText', async () => {
+test('TC#10 spaKeepsGoingOnRepeatedMiddleText', async () => {
   // 주소가 그대로인 SPA 에서도 중간에 같은 본문(삽화·공지)이 다시 나오면 계속 받는다.
   const { n, log } = await runLogged(d => fixtureSpaBodies(d, ['본문 1', '(삽화)', '본문 3', '(삽화)', '본문 5']), { maxPages: 8 });
   assert.equal(n, 5, log);
 });
 
-test('spaStopsWhenBackToFirstPage', async () => {
+test('TC#10 spaStopsWhenBackToFirstPage', async () => {
   // 주소가 그대로인 SPA 의 마지막 next 가 첫 페이지로 돌아가면 멈춘다.
   const { n, log } = await runLogged(d => fixtureSpaBodies(d, ['본문 1', '본문 2', '본문 3'], true), { maxPages: 8 });
   assert.equal(n, 3, log);
   assert.match(log, /중단: .*이미 받은 페이지/);
 });
 
-test('imageModeLoadsLazyImagesInsideScrollBox', async () => {
+test('TC#25 imageModeLoadsLazyImagesInsideScrollBox', async () => {
   // 본문이 스크롤 상자 안에 있으면 창을 내려도 상자 안 이미지가 화면에 들어오지 않는다 → 대상 이미지마다 화면 안으로 가져온다.
   const d = tempDir();
   write(path.join(d, 'real.png'), PNG);
@@ -1072,7 +1074,7 @@ test('imageModeLoadsLazyImagesInsideScrollBox', async () => {
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png'], logs.join('\n'));
 });
 
-test('overlappingFetchIsRejected', async () => {
+test('TC#27 overlappingFetchIsRejected', async () => {
   // 이미지별 Referer 정책은 한 번에 하나만 들고 있다 → 겹쳐 부르면 섞이지 않게 거부한다.
   const d = tempDir();
   write(path.join(d, 'a.png'), PNG);
@@ -1089,7 +1091,7 @@ test('overlappingFetchIsRejected', async () => {
   }
 });
 
-test('spaStopsWhenCyclingThroughMiddlePages', async () => {
+test('TC#10 spaStopsWhenCyclingThroughMiddlePages', async () => {
   // 주소가 그대로인 SPA 가 중간 페이지로 돌아가 순환하면(1→2→3→2→3…) 같은 넘어감이 다시 나올 때 멈춘다.
   const order = ['본문 1', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2'];
   const { n, log } = await runLogged(d => {
@@ -1103,7 +1105,7 @@ test('spaStopsWhenCyclingThroughMiddlePages', async () => {
   assert.match(log, /중단: .*이미 받은 페이지/);
 });
 
-test('errorStartPageIsNotSaved', async () => {
+test('TC#11 errorStartPageIsNotSaved', async () => {
   // 시작 주소(이어 받기 주소 포함)가 HTTP 오류면 오류 페이지를 1페이지로 저장하지 않고 상태 코드로 멈춘다.
   const d = tempDir();
   const srv = await serve(d, (_req, res) => {
@@ -1121,7 +1123,7 @@ test('errorStartPageIsNotSaved', async () => {
   assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 404')), logs.join('\n'));
 });
 
-test('imageModeErrorPageIsNotSaved', async () => {
+test('TC#11 imageModeErrorPageIsNotSaved', async () => {
   // 이미지 모드에서도 next 로 넘어간 오류 페이지의 이미지를 받지 않고 멈춘다.
   const d = tempDir();
   write(path.join(d, 'a.png'), PNG);
@@ -1142,4 +1144,163 @@ test('imageModeErrorPageIsNotSaved', async () => {
   }
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
   assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 503')), logs.join('\n'));
+});
+
+test('TC#31 runsDoNotShareCookies', async () => {
+  const d = tempDir();
+  const srv = await serve(d, cookieHandler);
+  try {
+    await scrape(`${srv.base}/p1.html`, '#c', '.next', path.join(d, 'a', 'p'), { timeout: 5000, ...quiet });
+    await scrape(`${srv.base}/p2.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 5000, ...quiet });
+  } finally {
+    await srv.close();
+  }
+  assert.equal(fs.readFileSync(path.join(d, 'a', 'p_0002.txt'), 'utf8'), 'a=1; b=2');
+  assert.equal(read(d, 'p_0001.txt'), 'undefined');
+});
+
+test('TC#32 probeListsImageCandidates', async () => {
+  const d = tempDir();
+  write(path.join(d, 'g.html'), '<body><div id=g><img src="a.png"><img src="b.png"></div><p><img src="c.png"></p></body>');
+  const logs: string[] = [];
+  await probe(pathToFileURL(path.join(d, 'g.html')).href, null, null, { timeout: 5000, onLog: m => logs.push(m) });
+  assert.match(logs.join('\n'), /\[이미지 후보[^\n]*\n\s+#g img\s+2장/);
+});
+
+/** next 를 눌러도 본문이 바뀌지 않는 페이지. */
+function fixtureStuck(d: string) {
+  write(path.join(d, 'stuck.html'), '<meta charset="utf-8"><body><div id=c>본문 1</div><button class=next>next</button></body>');
+  return pathToFileURL(path.join(d, 'stuck.html')).href;
+}
+
+test('TC#7 stopsWithReasonWhenTargetDoesNotChange', async () => {
+  const { n, log } = await runLogged(fixtureStuck, { timeout: 1500 });
+  assert.equal(n, 1);
+  assert.match(log, /중단: next 클릭 후 1500ms 동안 수집 대상이 바뀌지 않았습니다.*타임아웃을 늘려/);
+});
+
+test('TC#7 firstPageTargetMissingFails', async () => {
+  const d = tempDir();
+  await assert.rejects(scrape(fixtureLink(d), '#none', '.next', path.join(d, 'out', 'p'), { timeout: 1000, ...quiet }), /#none/);
+  assert.deepEqual(outFiles(d), []);
+});
+
+test('TC#12 stopWhileWaitingForChangeStopsAtOnce', async () => {
+  const d = tempDir();
+  const ctl = new AbortController();
+  const logs: string[] = [];
+  const started = Date.now();
+  const n = await scrape(fixtureStuck(d), '#c', '.next', path.join(d, 'out', 'p'), {
+    timeout: 10000, signal: ctl.signal,
+    onLog: m => { logs.push(m); if (m.startsWith('[1]')) setTimeout(() => ctl.abort(), 300); },
+  });
+  assert.equal(n, 1);
+  assert.ok(Date.now() - started < 5000, String(Date.now() - started));
+  assert.ok(logs.some(l => l.includes('사용자 중지')), logs.join('\n'));
+});
+
+test('TC#12 imageModeStopSkipsRemainingImages', async () => {
+  const d = tempDir();
+  for (const name of ['a', 'b', 'c']) write(path.join(d, `${name}.png`), PNG);
+  // 페이지가 직접 그리지 않게 data-src 에 둔다 → 서버가 받는 이미지 요청은 수집이 보낸 것뿐이다.
+  write(path.join(d, 'i.html'), '<body><div id=c><img data-src="a.png"><img data-src="b.png"><img data-src="c.png"></div><a class="next" href="i.html">n</a></body>');
+  const ctl = new AbortController();
+  const files = staticFile();
+  const requested: string[] = [];
+  const srv = await serve(d, (req, res, dir) => {
+    if ((req.url ?? '').endsWith('.png')) {
+      requested.push(req.url ?? '');
+      ctl.abort();
+    }
+    files(req, res, dir);
+  });
+  const logs: string[] = [];
+  try {
+    const n = await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', signal: ctl.signal, onLog: m => logs.push(m) });
+    assert.equal(n, 1);
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(requested, ['/a.png']);
+  assert.ok(!logs.some(l => l.includes('건너뜀')), logs.join('\n'));
+  assert.ok(logs.some(l => l.includes('사용자 중지')), logs.join('\n'));
+});
+
+test('TC#20 charsetNotJudgedWhenBytesMissing', async () => {
+  // 첫 문서는 올바른 UTF-8 로 읽힌다 → 둘째 문서의 바이트를 못 얻었을 때 첫 문서 바이트로 판정하면 경고가 나온다.
+  const d = tempDir();
+  write(path.join(d, 'a.html'), Buffer.from('<meta charset="utf-8"><div id=c>본문 1 가나다</div><a class="next" href="b.html">n</a>'));
+  write(path.join(d, 'b.html'), Buffer.from('<div id=c>본문 2 가나다</div><a class="next" aria-disabled="true">n</a>'));
+  let bodies = 0;
+  const logs: string[] = [];
+  const srv = await serve(d);
+  try {
+    const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), {
+      timeout: 5000, onLog: m => logs.push(m),
+      cdp: send => (method, params) => method === 'Fetch.getResponseBody' && ++bodies > 1 ? Promise.reject(new Error('고장')) : send(method, params),
+    });
+    assert.equal(n, 2);
+  } finally {
+    await srv.close();
+  }
+  assert.ok(!logs.some(l => l.includes('경고')), logs.join('\n'));
+});
+
+test('TC#25 imageModeScrollFailureOnlyWarns', async () => {
+  const { pages, names, log } = await runImages('src', 1, {
+    cdp: send => (method, params) => method === 'Runtime.evaluate' && String((params as { expression?: string })?.expression).includes('scrollTo')
+      ? Promise.reject(new Error('스크롤 고장')) : send(method, params),
+  });
+  assert.equal(pages, 1);
+  assert.equal(names.length, 2);
+  assert.match(log, /경고: 페이지 끝까지 스크롤하지 못했습니다/);
+});
+
+test('TC#26 imageModeKeepsSvg', async () => {
+  const d = tempDir();
+  write(path.join(d, 'i.html'), '<body><div id=c><img src="v"></div></body>');
+  const files = staticFile();
+  const srv = await serve(d, (req, res, dir) => {
+    if ((req.url ?? '').endsWith('/v')) {
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+      res.end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>');
+    } else files(req, res, dir);
+  });
+  try {
+    await scrape(`${srv.base}/i.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 3000, mode: 'image', ...quiet });
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.svg']);
+});
+
+test('TC#30 clickableNextToLocalFileIsNotFollowed', async () => {
+  const d = tempDir();
+  const secret = path.join(d, 'secret.html');
+  write(secret, '<meta charset="utf-8"><div id=c>비밀</div>');
+  write(path.join(d, 'a.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" href="${pathToFileURL(secret).href}">n</a></body>`);
+  const logs: string[] = [];
+  const srv = await serve(d);
+  try {
+    const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 1500, onLog: m => logs.push(m) });
+    assert.equal(n, 1);
+  } finally {
+    await srv.close();
+  }
+  assert.deepEqual(outFiles(d).map(f => read(d, f)), ['본문 1']);
+  assert.ok(logs.some(l => l.includes('중단') && l.includes('바뀌지 않았습니다')), logs.join('\n'));
+});
+
+test('TC#21 pickerPageAppliesCharset', async () => {
+  const d = tempDir();
+  writeUndeclaredUtf8(d);
+  const srv = await serve(d);
+  const page = await Page.open({ charset: 'utf-8', picker: { targets: ['본문'], onPick: () => {}, onDone: () => {} } });
+  try {
+    await page.goto(`${srv.base}/ep/`, 5000);
+    assert.equal(await page.eval<string>(`document.querySelector('#c').innerText`), '본문 1 가나다');
+  } finally {
+    page.close();
+    await srv.close();
+  }
 });
