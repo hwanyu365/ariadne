@@ -279,11 +279,9 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
   if (clash) log(`경고: 이미 같은 이름의 파일이 있어 덮어쓰거나 섞일 수 있습니다: ${clash}`);
   const all = o.merge && !images ? `${base}_all.txt` : null;
   // 이어 받기(시작 번호 2 이상)는 앞서 합친 본문 뒤에 붙인다.
+  let fresh = false;
   if (all && start > 1 && fs.existsSync(all)) log(`  이어 씁니다: ${path.basename(all)}`);
-  else if (all) {
-    if (fs.existsSync(all)) log(`경고: 이미 있는 파일을 새로 씁니다: ${path.basename(all)}`);
-    fs.writeFileSync(all, '', 'utf8');
-  }
+  else if (all) fresh = true;
   let pages = 0;
   let last = '';
   // 장편은 본문 전체를 쌓으면 메모리가 커진다 → 해시만 남긴다.
@@ -317,7 +315,12 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
         log(`[${pages}] 이미지 ${n}장 -> ${path.basename(base)}_${pad(num, digits)}_*`);
       } else {
         const { size, name, body } = await saveText(page, current, base, num, digits, titleSel, log);
-        if (all) fs.appendFileSync(all, fs.statSync(all).size ? `\n\n${body}` : body, 'utf8');
+        // 첫 페이지를 받기 전에 비우면 시작 페이지를 열지 못한 수집이 앞서 합친 본문을 지운다.
+        if (all && fresh) {
+          if (fs.existsSync(all)) log(`경고: 이미 있는 파일을 새로 씁니다: ${path.basename(all)}`);
+          fs.writeFileSync(all, body, 'utf8');
+        } else if (all) fs.appendFileSync(all, fs.statSync(all).size ? `\n\n${body}` : body, 'utf8');
+        fresh = false;
         log(`[${pages}] ${size}자 -> ${name}`);
         if (!warned) {
           // 페이지마다 선언이 다를 수 있어 매번 보되, 같은 경고로 로그를 덮지 않게 한 번만 낸다.
