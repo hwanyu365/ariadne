@@ -1294,11 +1294,27 @@ test('TC#12 imageModeStopWhileScrollingNextPageStopsAtOnce', async () => {
   const d = tempDir();
   write(path.join(d, 'a.png'), PNG);
   write(path.join(d, 'i1.html'), '<body><div id=c><img src="a.png"></div><a class="next" href="i2.html">n</a></body>');
-  write(path.join(d, 'i2.html'), '<body><div id=c><img src="a.png?2"></div><div style="height:400000px"></div></body>');
-  const { n, log, took } = await stopAfterFirstPage(pathToFileURL(path.join(d, 'i1.html')).href, d, 2000, { mode: 'image' }, '#c img');
-  assert.equal(n, 1, log);
-  assert.ok(took < 1500, `${took}ms\n${log}`);
-  assert.ok(log.includes('사용자 중지'), log);
+  // 훑기가 시작된 것을 보고 중지한다 → 넘어가기가 느린 환경에서도 중지가 훑기 중에 걸린다. 가려진 창은 scroll 이벤트가 늦을 수 있어 타이머로 본다.
+  write(path.join(d, 'i2.html'), '<body><div id=c><img src="a.png?2"></div><div style="height:400000px"></div><script>const t = setInterval(() => { if (scrollY > 0) { clearInterval(t); fetch("scrolled"); } }, 50)</script></body>');
+  const ctl = new AbortController();
+  let stoppedAt = 0;
+  const files = staticFile();
+  const srv = await serve(d, (req, res, dir) => {
+    if (!(req.url ?? '').endsWith('/scrolled')) return files(req, res, dir);
+    stoppedAt = Date.now();
+    ctl.abort();
+    res.end();
+  });
+  const logs: string[] = [];
+  try {
+    const n = await scrape(`${srv.base}/i1.html`, '#c img', '.next', path.join(d, 'out', 'p'), { timeout: 10000, mode: 'image', signal: ctl.signal, onLog: m => logs.push(m) });
+    const took = Date.now() - stoppedAt;
+    assert.equal(n, 1, logs.join('\n'));
+    assert.ok(stoppedAt && took < 1500, `${took}ms\n${logs.join('\n')}`);
+  } finally {
+    await srv.close();
+  }
+  assert.ok(logs.some(l => l.includes('사용자 중지')), logs.join('\n'));
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
 });
 
