@@ -1,15 +1,17 @@
-# merge-gate.sh 가 쓰는 명령 해석 단계. 부르는 쪽이 deny·pass 를 먼저 정의한다.
+# merge-gate.sh·commit-gate.sh 가 쓰는 명령 해석 단계. 부르는 쪽이 deny·pass 를 먼저 정의한다.
 us=$(printf '\037')
 
 # stdin 을 읽어 segments.awk 로 나눈다. 해석 실패는 $1 글자가 명령에 있을 때만 막는다 → 해석기의 빈틈이 모든 명령을 막지 않게 한다.
 load() {
   input=$(cat)
   # macOS awk 는 UTF-8 locale 에서 문자열 == 를 정렬 규칙으로 비교해 서로 다른 한글을 같다고 본다 → 바이트로 비교하게 C locale 로 돈다.
-  segs=$(printf '%s' "$input" | LC_ALL=C awk -f "$here/segments.awk") || deny "명령 해석기를 실행하지 못함"
+  segs=$(printf '%s' "$input" | LC_ALL=C awk -v needle="$1" -f "$here/segments.awk") || deny "명령 해석기를 실행하지 못함"
   e=$(printf '%s\n' "$segs" | sed -n "s/^E$us//p")
   [ -n "$e" ] || return 0
   [ "$e" = "명령을 읽지 못함" ] && deny "$e"
-  case "$input" in *"$1"*) deny "$e" ;; *) pass ;; esac
+  # 입력 JSON 전체가 아니라 명령만 본다 → cwd·transcript_path 의 글자(저장소 이름 등)로 막지 않는다.
+  printf '%s\n' "$segs" | grep -qx H && deny "$e"
+  pass
 }
 
 # 단순 명령 앞의 셸 예약어, VAR=값, 실행을 감싸는 명령(env·timeout 등)과 그 옵션을 벗긴다.
