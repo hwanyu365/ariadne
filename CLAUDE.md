@@ -162,8 +162,9 @@ npm run verify
   - 올리는 방식은 squash merge 로 한다. 설정은 rebase·merge commit 도 열어 두지만 쓰지 않는다 → PR 의 커밋이나 merge commit 이 `main` 에 남는다.
   - 리뷰 지적은 조사해 사실인 것만 반영하고, 반영하지 않은 것은 근거를 남긴다. 미해결 대화가 merge 를 막지는 않는다.
     - 막게 하면(`required_conversation_resolution`) 지적 하나하나가 차단 요건이 되고, 반영 push 가 다시 리뷰를 깨워 라운드가 끝나지 않는다.
-  - 브랜치가 최신 `main` 이 아니면 merge 되지 않는다 (`required_status_checks.strict`).
-    - **상태를 미리 조회해 분기하지 않는다. `gh pr merge` 의 거부가 신호다.** 조회로 판정하면 조회 실패(권한 부족, 보호 규칙 없음)와 "켜져 있음" 을 구분하는 분기가 또 필요해진다.
+  - 브랜치가 최신 `main` 이 아니어도 merge 된다 (브랜치 보호 `required_status_checks.strict` 와 ruleset 의 `strict_required_status_checks_policy` 둘 다 꺼짐) → 다른 PR 이 먼저 merge 될 때마다 갱신·CI 재실행을 반복하지 않는다.
+    - 잃는 보호: PR 의 CI 는 PR 브랜치를 검증한다 → merge 결과(`main` + PR)는 merge 뒤 `main` push CI 가 처음 검증한다. merge 뒤 그 실행이 실패하면 고치는 PR 을 먼저 올린다.
+    - **상태를 미리 조회해 분기하지 않는다. `gh pr merge` 의 거부(충돌 등)가 신호다.** 조회로 판정하면 조회 실패(권한 부족, 보호 규칙 없음)와 거부 사유를 구분하는 분기가 또 필요해진다.
     - 거부되면 `gh pr update-branch {PR번호}` 로 갱신하고 이어서 `git pull --ff-only` 로 로컬을 맞춘다 → 원격만 바뀌므로 이후 작업이 낡은 로컬 위에 쌓인다.
     - 갱신 뒤의 리뷰 반영은 그 위에 새 커밋으로 올린다 → squash merge 라 갱신이 만든 merge commit 은 `main` 에 남지 않는다.
     - `gh pr checks {PR번호}` 의 `verify`·`review` 행이 통과로 바뀌면 다시 merge 한다. 필수가 아닌 체크의 실패는 판정에 넣지 않는다.
