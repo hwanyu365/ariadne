@@ -1247,6 +1247,61 @@ test('TC#12 imageModeStopSkipsRemainingImages', async () => {
   assert.ok(logs.some(l => l.includes('사용자 중지')), logs.join('\n'));
 });
 
+/** 첫 페이지를 저장하고 delay ms 뒤 중지한다. 중지부터 scrape 가 끝날 때까지 걸린 시간을 함께 돌려준다. */
+async function stopAfterFirstPage(url: string, d: string, delay: number, opts: ScrapeOptions = {}, sel = '#c') {
+  const ctl = new AbortController();
+  const logs: string[] = [];
+  let stoppedAt = 0;
+  const n = await scrape(url, sel, '.next', path.join(d, 'out', 'p'), {
+    timeout: 10000, ...opts, signal: ctl.signal,
+    onLog: m => { logs.push(m); if (m.startsWith('[1]')) setTimeout(() => { stoppedAt = Date.now(); ctl.abort(); }, delay); },
+  });
+  return { n, log: logs.join('\n'), took: Date.now() - stoppedAt };
+}
+
+test('TC#12 stopWhileClickingNextStopsAtOnce', async () => {
+  // 가려진 next 는 누를 수 있게 될 때까지 다시 잰다 → 그 사이 누른 중지를 기다리게 하지 않는다.
+  const d = tempDir();
+  write(path.join(d, 'p1.html'), pageHtml('본문 1', '<a class="next" href="p2.html">n</a><div style="position:fixed;inset:0;background:#fff"></div>'));
+  write(path.join(d, 'p2.html'), pageHtml('본문 2', ''));
+  const { n, log, took } = await stopAfterFirstPage(pathToFileURL(path.join(d, 'p1.html')).href, d, 300);
+  assert.equal(n, 1, log);
+  assert.ok(took < 1000, `${took}ms\n${log}`);
+  assert.ok(log.includes('사용자 중지'), log);
+  assert.deepEqual(outFiles(d, /./), ['p_0001.txt']);
+});
+
+test('TC#12 stopWhileGoingToNextStopsAtOnce', async () => {
+  // 응답하지 않는 next 주소로 이동하는 중에 누른 중지는 타임아웃까지 기다리지 않는다.
+  const d = tempDir();
+  const srv = await serve(d, (req, res) => {
+    if (!(req.url ?? '').endsWith('a.html')) return;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(pageHtml('본문 1', '<a class="next" href="stall.html" style="display:none">n</a>'));
+  });
+  try {
+    const { n, log, took } = await stopAfterFirstPage(`${srv.base}/a.html`, d, 300);
+    assert.equal(n, 1, log);
+    assert.ok(took < 1500, `${took}ms\n${log}`);
+    assert.ok(log.includes('사용자 중지'), log);
+  } finally {
+    await srv.close();
+  }
+});
+
+test('TC#12 imageModeStopWhileScrollingNextPageStopsAtOnce', async () => {
+  // 이미지 모드는 넘어간 페이지를 끝까지 훑은 뒤 저장한다 → 긴 페이지를 훑는 중 누른 중지도 그 자리에서 반영한다.
+  const d = tempDir();
+  write(path.join(d, 'a.png'), PNG);
+  write(path.join(d, 'i1.html'), '<body><div id=c><img src="a.png"></div><a class="next" href="i2.html">n</a></body>');
+  write(path.join(d, 'i2.html'), '<body><div id=c><img src="a.png?2"></div><div style="height:400000px"></div></body>');
+  const { n, log, took } = await stopAfterFirstPage(pathToFileURL(path.join(d, 'i1.html')).href, d, 2000, { mode: 'image' }, '#c img');
+  assert.equal(n, 1, log);
+  assert.ok(took < 1500, `${took}ms\n${log}`);
+  assert.ok(log.includes('사용자 중지'), log);
+  assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
+});
+
 test('TC#20 charsetNotJudgedWhenBytesMissing', async () => {
   // 첫 문서는 올바른 UTF-8 로 읽힌다 → 둘째 문서의 바이트를 못 얻었을 때 첫 문서 바이트로 판정하면 경고가 나온다.
   const d = tempDir();

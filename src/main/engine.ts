@@ -139,6 +139,20 @@ async function scrollFor(page: Page, log: Log, selector: string) {
     .catch(e => log(`  경고: 페이지 끝까지 스크롤하지 못했습니다 (${firstLine(e).slice(0, 60)})`));
 }
 
+const STOP = Symbol('stop');
+
+/** 중지가 먼저 오면 p 를 기다리지 않는다. 남은 작업은 창을 닫을 때 끝난다. */
+function unlessStopped<T>(p: Promise<T>, signal?: AbortSignal): Promise<T | typeof STOP> {
+  if (!signal) return p;
+  p.catch(() => {});
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return resolve(STOP);
+    const stop = () => resolve(STOP);
+    signal.addEventListener('abort', stop, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop));
+  });
+}
+
 /** 주소는 원격 페이지가 정한다 → 웹 주소이거나 지금 페이지와 같은 스킴일 때만 따라간다. 원격 페이지가 로컬 파일을 가리키게 하지 않는다. */
 export function reachable(url: URL, pageUrl: string): boolean {
   return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === new URL(pageUrl).protocol;
@@ -341,7 +355,11 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
       if (maxPages && pages >= maxPages) break;
       // 왜 멈췄는지 남긴다. 셀렉터 오타로 1페이지만 받고 끝나는 게 가장 흔한 사고다.
       const docs = page.documents();
-      const why = await gotoNext(page, nextSel, timeout);
+      const why = await unlessStopped(gotoNext(page, nextSel, timeout), o.signal);
+      if (why === STOP) {
+        log('  중단: 사용자 중지.');
+        break;
+      }
       if (why) {
         log(`  중단: ${why}${pages === 1 ? ' 셀렉터를 probe 로 확인하세요.' : ''}`);
         break;
@@ -364,8 +382,12 @@ export async function scrape(url: string, sel: string, nextSel: string, prefix: 
       }
       if (images) {
         // 바뀐 것만 보고 넘어가면 아직 주소가 안 붙은 지연 이미지를 놓친다.
-        await scrollFor(page, log, sel);
-        next = await read(page, sel, timeout);
+        const got = await unlessStopped(scrollFor(page, log, sel).then(() => read(page, sel, timeout)), o.signal);
+        if (got === STOP) {
+          log('  중단: 사용자 중지.');
+          break;
+        }
+        next = got;
       }
       // 주소가 그대로면 본문만 남는다 → 중간의 같은 본문(삽화)에서 멈추지 않게, 첫 페이지로 돌아오거나 같은 넘어감이 다시 나올 때만 본다.
       const key = keyOf(next);
