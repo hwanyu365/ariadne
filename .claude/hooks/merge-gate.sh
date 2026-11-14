@@ -77,19 +77,45 @@ done
 
 cd "$(git rev-parse --show-toplevel)" || deny "git 저장소가 아님"
 # 번호가 없으면 gh 처럼 현재 브랜치의 PR 이 대상이다.
-pr=$(gh pr view $n --json number,headRefOid -q '"\(.number) \(.headRefOid)"') || deny "PR 을 조회하지 못함"
-n=${pr% *}; sha=${pr#* }
+pr=$(gh pr view $n --json number,headRefOid,author -q '"\(.number) \(.headRefOid) \(.author.login)"') || deny "PR 을 조회하지 못함"
+n=${pr%% *}; sha=${pr#* }; by=${sha#* }; sha=${sha%% *}
 # 검사한 head 와 merge 되는 head 를 묶는다 → 검사 뒤 끼어든 push 는 gh 가 거부한다.
 case "$sha" in "$mh"*) [ ${#mh} -ge 7 ] || deny "--match-head-commit $sha 를 붙인다" ;; *) deny "--match-head-commit $sha 를 붙인다" ;; esac
 
 gh pr checks "$n" >/dev/null 2>&1 || deny "CI 가 통과하지 않았거나 진행 중 (gh pr checks $n)"
 
+# Dependabot 실행에는 리뷰 secret 이 없어 Claude App 요약이 생기지 않는다 → 세션 계정 요약을 인정하는 대신, 세션이 브랜치에 더한 코드를 스스로 승인하지 못하게 커밋과 업데이트 종류를 먼저 본다.
+# update-type 은 간접 의존성·보안 업데이트에서 빠진다 → 그때는 본문의 "from A to B" 의 첫 숫자 자리를 비교한다.
+dq='def maj: [match("^v?([0-9]+)")] | if length == 0 then null else .[0].captures[0].string end;
+.[] | if .author.login != "dependabot[bot]" then "author"
+  elif .commit.verification.verified != true then "author"
+  else (.commit.message | split("\n---\nupdated-dependencies:\n")) as $p
+    | if ($p | length) != 2 then "version" else
+      [$p[0] | scan("(?:`([^`\n]+)`|\\[([^\\]\n]+)\\]\\([^)\n]*\\)) from ([^ \n]+) to ([^ \n]+)") | {n: (.[0] // .[1]), a: .[2], b: .[3]}] as $vs
+      | [$p[1] | split("\n...")[0] | split("- dependency-name: ")[1:][]
+        | (split("\n")[0]) as $n | ([match("\n  update-type: ([^\n]+)")][0].captures[0].string) as $u
+        | if $u then ($u == "version-update:semver-patch" or $u == "version-update:semver-minor")
+          else [$vs[] | select(.n == $n)] | length > 0 and all(.[]; (.a | maj) as $x | (.b | maj) as $y
+            | $x != null and $x == $y) end] as $r
+      | if ($r | length) == 0 or any($r[]; . != true) then "version" else "ok" end end end'
+dep=""
+if [ "$by" = app/dependabot ]; then
+  d=$(gh api "repos/{owner}/{repo}/pulls/$n/commits" --paginate --jq "$dq") || deny "Dependabot PR 의 커밋을 조회하지 못함"
+  case "$(printf '%s\n' "$d" | sort -u | tr '\n' ' ')" in
+    "ok ") dep=1 ;;
+    *author*) deny "Dependabot 이 작성·서명하지 않은 커밋이 있음 → @dependabot recreate 로 다시 만든다" ;;
+    *) deny "patch·minor 가 아닌 업데이트가 있거나 업데이트 종류를 읽지 못함" ;;
+  esac
+fi
+
 # github 리뷰는 Claude App 이, local 리뷰는 세션의 gh 계정이 쓴 요약만 인정한다 → 같은 양식을 다른 계정이 남겨도 통과하지 않는다.
+who=""
 if [ -f .github/workflows/claude-review.yml ]; then
   who='.user.type == "Bot" and .performed_via_github_app.slug == "claude"'
-else
+fi
+if [ -z "$who" ] || [ -n "$dep" ]; then
   me=$(gh api user -q .login) && [ -n "$me" ] || deny "gh 계정을 조회하지 못함"
-  who=".user.login == \"$me\""
+  who="${who:+($who) or }.user.login == \"$me\""
 fi
 # Blocking 절이 여럿이면(코드블록에 양식을 인용한 경우 등) 모두 본다.
 q='.[] | select(WHO) | .body | select(startswith("HEAD: SHA")) | split("\n## ") | map(select(startswith("🔴 Blocking")))

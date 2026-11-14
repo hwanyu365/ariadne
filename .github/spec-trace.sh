@@ -27,6 +27,39 @@ set -f
 # -w: 짧은 번호가 긴 번호의 앞부분에 맞지 않게. --untracked: 커밋 전 테스트도 센다.
 git -c core.quotePath=false grep -n -o -w -E --untracked 'TC#[0-9]+' -- "$@" > "$tmp/hits" || true
 
+# 함수 이름이 테스트 이름인 언어는 # 를 쓸 수 없다 → 정의 줄 식별자의 tc{n} 토큰(test_tc9_x, TestTC9X, fn tc9_x)을 TC#n 으로 센다.
+# 정의 줄만 본다 → 일반 코드의 tc9_ 는 테스트가 아니다. 입력 hit: "파일:줄:내용" → "파일:줄:TC#n", name: "내용" → "TC#n 식별자".
+defs='(^|[^A-Za-z0-9_])(def|func|fn|fun|void|function|Task)[[:space:]]'
+ident() {
+  LC_ALL=C awk -v mode="$1" '
+    function tcs(id, out,   n, i, c, p, k, d, a) {
+      n = 0
+      for (i = 1; i < length(id); i++) {
+        c = substr(id, i, 2); p = (i > 1) ? substr(id, i - 1, 1) : ""
+        if (!(c == "tc" || c == "TC" || c == "Tc" || c == "tC")) continue
+        if (!(p == "" || p == "_" || (p ~ /[a-z0-9]/ && (c == "TC" || c == "Tc")))) continue
+        k = i + 2; d = ""
+        while (substr(id, k, 1) ~ /[0-9]/) { d = d substr(id, k, 1); k++ }
+        a = substr(id, k, 1)
+        if (d == "" || !(a == "" || a == "_" || a ~ /[A-Z]/)) continue
+        out[++n] = "TC#" (d + 0)
+      }
+      return n
+    }
+    {
+      line = $0; loc = ""
+      if (mode == "hit") { if (!match(line, /:[0-9]+:/)) next; loc = substr(line, 1, RSTART + RLENGTH - 2); line = substr(line, RSTART + RLENGTH) }
+      if (!match(line, /(^|[^A-Za-z0-9_])(def|func|fn|fun|void|function|Task)[ \t]+/)) next
+      rest = substr(line, RSTART + RLENGTH)
+      if (substr(rest, 1, 1) == "(") { e = index(rest, ")"); if (e == 0) next; rest = substr(rest, e + 1); sub(/^[ \t]+/, "", rest) }
+      if (!match(rest, /^[A-Za-z_][A-Za-z0-9_]*/)) next
+      id = substr(rest, 1, RLENGTH)
+      m = tcs(id, t)
+      for (j = 1; j <= m; j++) print (mode == "hit") ? loc ":" t[j] : t[j] " " id
+    }'
+}
+git -c core.quotePath=false grep -n -E --untracked "$defs" -- "$@" | ident hit >> "$tmp/hits" || true
+
 # shellcheck disable=SC2086
 # -b 가 있으면 [확인필요] 는 분기점 뒤에 추가·변경된 줄만 E 다 → 범위 밖에 원래 있던 것은 W 로 보고만 한다.
 : > "$tmp/new"
@@ -55,6 +88,11 @@ function ids(s, out,   n, t, p, a, b, i) {
     } else out[++n] = t
   }
   return n
+}
+function badtag(s,   t, k) {
+  t = "[확인필요"
+  while ((k = index(s, t)) > 0) { s = substr(s, k + length(t)); if (substr(s, 1, 1) != "]") return 1 }
+  return 0
 }
 function covered(key,   p, r, m, j) {
   if (key in ref) return 1
@@ -91,6 +129,12 @@ sec != "A" && index($0, "[확인필요]") {
   if (!isitem) print "W UNCONFIRMED_MENTION " f ":" FNR " -"
   else if (scoped && !((f ":" FNR) in changed)) print "W UNCONFIRMED_OLD " f ":" FNR " -"
   else print "E UNCONFIRMED " f ":" FNR " -"
+}
+# 태그는 [확인필요] 하나뿐이다 → 설명을 붙인 변형([확인필요: …])이 위 검사에서 조용히 빠지지 않게 형식 위반으로 낸다. 항목이 아닌 줄은 정상형과 같이 W 다.
+sec != "A" && badtag($0) {
+  if (!isitem) print "W BAD_UNCONFIRMED_MENTION " f ":" FNR " -"
+  else if (scoped && !((f ":" FNR) in changed)) print "W BAD_UNCONFIRMED_OLD " f ":" FNR " -"
+  else print "E BAD_UNCONFIRMED " f ":" FNR " -"
 }
 # 정의 자리(§3·§4, 색인의 번호 없는 절)의 줄 머리 글머리가 형식을 어긴 ID 로 시작하면 막는다 → 정의가 검사에서 조용히 빠지지 않는다.
 (sec == 3 || sec == 4 || (f == idx && sec == "?")) && $0 ~ /^(-[ \t]*|[*+][ \t]+|[0-9]+\.[ \t]*)(\*\*|\[)?`?[A-Z]+#[0-9]/ && $0 !~ /^- `[A-Z]+#[0-9]+[a-z]?`/ {
@@ -153,8 +197,8 @@ END {
 # W 로만 낸다 → TC 가 스펙에 남아 테스트가 0건이면 NO_TEST 가 이미 E 이고, TC 까지 지웠으면 스펙 diff 리뷰 대상이다.
 if [ -n "$base" ]; then
   name='TC#[0-9]+[^`"'"'"']*'
-  git grep -h -o -E "$name" "$base" -- "$@" | sed 's/[[:space:]]*$//' | sort -u > "$tmp/b" || true
-  git grep -h -o -E --untracked "$name" -- "$@" | sed 's/[[:space:]]*$//' | sort -u > "$tmp/h" || true
+  { git grep -h -o -E "$name" "$base" -- "$@" | sed 's/[[:space:]]*$//'; git grep -h -E "$defs" "$base" -- "$@" | ident name; } | sort -u > "$tmp/b" || true
+  { git grep -h -o -E --untracked "$name" -- "$@" | sed 's/[[:space:]]*$//'; git grep -h -E --untracked "$defs" -- "$@" | ident name; } | sort -u > "$tmp/h" || true
   comm -23 "$tmp/b" "$tmp/h" | while IFS= read -r t; do
     id=${t%% *}
     if grep -q -E "^$id([^0-9]|\$)" "$tmp/h"; then echo "W TEST_NAME_GONE $base $t"; else echo "W TEST_REMOVED $base $t"; fi

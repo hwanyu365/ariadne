@@ -10,6 +10,7 @@
       "Bash(gh issue view:*)",
       "Bash(gh issue list:*)",
       "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
       "Bash(gh pr diff:*)",
       "Bash(gh pr checks:*)",
       "Bash(gh run list:*)",
@@ -75,6 +76,11 @@
             "if": "Bash(git * commit*)",
             "onFailure": "block",
             "command": "cd \"$CLAUDE_PROJECT_DIR\" && sh .claude/hooks/hooks-path.sh --check"
+          },
+          {
+            "type": "command",
+            "onFailure": "block",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/commit-gate.sh\""
           },
           {
             "type": "command",
