@@ -60,6 +60,11 @@ test('TC#40 pickRejectsBadPayload', () => {
     assert.equal(pickUpdate(bad), null, JSON.stringify(bad));
 });
 
+test('TC#40 pickRejectsInheritedTargetNames', () => {
+  for (const target of ['constructor', 'toString', '__proto__', 'hasOwnProperty'])
+    assert.equal(pickUpdate({ target, sel: '#c' }), null, target);
+});
+
 test('TC#40 pickToleratesBrokenCandidates', () => {
   // 후보 목록이 망가져도 셀렉터는 반영한다. 로그 한 줄 때문에 선택을 버리지 않는다.
   for (const candidates of ['엉뚱', null, [{ sel: '.n' }, { n: 1 }, 'x']]) {

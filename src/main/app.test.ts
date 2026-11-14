@@ -315,6 +315,20 @@ test('TC#49 windowFillsSitePresetForAnotherHost', async () => {
   }
 });
 
+test('TC#46 windowShowsPageTextAsPlainText', async () => {
+  const win = await open();
+  try {
+    win.webContents.send('run:log', { text: '중단: <img id=evil src=x>', level: 'info', progress: null });
+    win.webContents.send('run:done', { stopped: false });
+    await until<boolean>(win, `!document.querySelector('#result').hidden`, v => v, 5000);
+    assert.equal(await js(win, `document.querySelectorAll('#log img, #result img, #announce img').length`), 0);
+    assert.match(await js<string>(win, `document.querySelector('#log').textContent`), /<img id=evil/);
+    assert.match(await js<string>(win, `document.querySelector('#result-text').textContent`), /<img id=evil/);
+  } finally {
+    win.destroy();
+  }
+});
+
 test('TC#43 windowShowsRunningStateWithoutMax', async () => {
   const d = tempDir();
   const win = await open();

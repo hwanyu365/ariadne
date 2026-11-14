@@ -198,3 +198,21 @@ test('TC#39 pickerIgnoresOtherWindowsPicks', async () => {
   assert.equal(got.b.length, 1);
   assert.deepEqual(got.a, []);
 });
+
+test('TC#39 pickerIgnoresOtherWindowsDone', async () => {
+  const done = { a: false, b: false };
+  const open = (key: 'a' | 'b') => Page.open({ picker: { targets: ['본문'], onPick: () => {}, onDone: () => { done[key] = true; } } });
+  const [a, b] = [await open('a'), await open('b')];
+  try {
+    const { url } = fixture();
+    await a.goto(url, 5000);
+    await b.goto(url, 5000);
+    await waitUi(b);
+    await clickToolbar(b, '완료');
+    await sleep(300);
+  } finally {
+    a.close();
+    b.close();
+  }
+  assert.deepEqual(done, { a: false, b: true });
+});
