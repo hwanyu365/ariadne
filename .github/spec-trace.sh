@@ -42,7 +42,8 @@ if [ -n "$base" ]; then
   done > "$tmp/new"
 fi
 
-awk -v hits="$tmp/hits" -v new="$tmp/new" -v scoped="${base:+1}" -v idx="docs/specification.md" '
+# macOS awk 는 UTF-8 locale 에서 문자열 == 를 정렬 규칙으로 비교해 서로 다른 한글을 같다고 본다 → 바이트로 비교하게 C locale 로 돈다.
+LC_ALL=C awk -v hits="$tmp/hits" -v new="$tmp/new" -v scoped="${base:+1}" -v idx="docs/specification.md" '
 function ids(s, out,   n, t, p, a, b, i) {
   n = 0
   while (match(s, /[A-Z]+#[0-9]+[a-z]?(~([A-Z]+#)?[0-9]+)?/)) {

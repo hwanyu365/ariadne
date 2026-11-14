@@ -4,7 +4,8 @@ us=$(printf '\037')
 # stdin 을 읽어 segments.awk 로 나눈다. 해석 실패는 $1 글자가 명령에 있을 때만 막는다 → 해석기의 빈틈이 모든 명령을 막지 않게 한다.
 load() {
   input=$(cat)
-  segs=$(printf '%s' "$input" | awk -f "$here/segments.awk") || deny "명령 해석기를 실행하지 못함"
+  # macOS awk 는 UTF-8 locale 에서 문자열 == 를 정렬 규칙으로 비교해 서로 다른 한글을 같다고 본다 → 바이트로 비교하게 C locale 로 돈다.
+  segs=$(printf '%s' "$input" | LC_ALL=C awk -f "$here/segments.awk") || deny "명령 해석기를 실행하지 못함"
   e=$(printf '%s\n' "$segs" | sed -n "s/^E$us//p")
   [ -n "$e" ] || return 0
   [ "$e" = "명령을 읽지 못함" ] && deny "$e"
