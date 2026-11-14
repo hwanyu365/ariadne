@@ -15,8 +15,10 @@ jobs:
     # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊는다.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -33,14 +35,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
       - run: npm ci
       - run: npm run dist
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ariadne-${{ matrix.os }}
           path: |
@@ -57,12 +61,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      # 쓰기 토큰이 git 설정에 남으면 빌드 스크립트가 읽을 수 있다. gh 는 GH_TOKEN 으로 동작한다.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 산출물 빌드·서명·배포는 스택마다 다르다. 비밀값은 Secrets 로만 넣고, 로그에 값이나 다운로드 URL 이 찍히지 않게 한다.
+      # public 저장소의 Release 첨부물은 누구나 받을 수 있다 → 배포 대상을 제한해야 하면 첨부하지 말고 별도 배포 채널을 쓴다.
       # 산출물 이름은 package.json 의 version 을 쓴다 → 태그와 다르면 다른 버전 파일이 Release 에 올라간다.
       - run: |
           want="v$(node -p 'require("./package.json").version')"
           if [ "$want" != "$GITHUB_REF_NAME" ]; then echo "::error::태그 $GITHUB_REF_NAME 와 package.json 버전 $want 이 다르다"; exit 1; fi
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: out
           merge-multiple: true

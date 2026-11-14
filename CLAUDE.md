@@ -2,7 +2,7 @@
 
 페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 데스크톱 도구
 
-이 저장소는 ADD(Agent Driven Development)로 개발한다.
+이 저장소는 agent 가 SDD(Spec-Driven Development) + TDD 로 개발한다.
 사람은 요구사항·결정·리뷰를 맡고, agent 는 스펙·테스트·구현·검증·PR 을 맡는다.
 
 ## 절차 도구
