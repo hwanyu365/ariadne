@@ -105,6 +105,7 @@
   gh release edit vPREV --latest
   ```
 
+  - 두 명령을 모두 실행한다 → draft 로 내리기만 하면 Latest 표시가 그 draft 에 남는다
   - 원인을 고친 뒤 다음 patch 버전으로 일반 릴리스 절차를 다시 밟는다
   - 롤백 사실은 이슈로 남긴다 → 받은 사람에게 알릴 자리가 이슈와 다음 Release 노트뿐이다
 
