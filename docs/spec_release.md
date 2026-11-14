@@ -6,8 +6,8 @@
 | --- | --- |
 | 문서명 | ariadne 배포 (UC6) |
 | 작성일 / 최종 수정일 | 2026-11-14 / 2026-11-14 |
-| 버전 | 1.0 |
-| 기준 커밋 ID | 3c5f8cd |
+| 버전 | 1.1 |
+| 기준 커밋 ID | 1cd7b71 |
 
 - **기능명:** OS 별 실행 파일 빌드와 GitHub Release
 - **목적 (Why):**
@@ -20,17 +20,19 @@
 
 - `v*` 태그 push → 세 OS 빌드 → 모두 성공하면 GitHub Release
 - 태그 없이 세 OS 빌드만 확인하는 수동 실행
+- 릴리스 확인 목록과 문제 Release 의 롤백 절차
 
 ### Out of Scope
 
 - 코드 서명·공증 (`NFR#12`)
 - 자동 업데이트, 설치 프로그램
+- 이미 받아 둔 실행 파일의 회수 → 자동 업데이트가 없어 롤백은 새로 받는 사람에게만 닿는다
 
 ## 3. 요구사항
 
 ### 3.1 사용자 스토리
 
-- `US#1` 개발 환경이 없는 사용자로서, 설치 없이 쓰기 위해, OS 에 맞는 실행 파일 하나를 받아 실행하기를 원한다 [요구사항] → FR#1~FR#4
+- `US#1` 개발 환경이 없는 사용자로서, 설치 없이 쓰기 위해, OS 에 맞는 실행 파일 하나를 받아 실행하기를 원한다 [요구사항] → FR#1~FR#5
 
 ### 3.2 기능 요구사항
 
@@ -65,6 +67,15 @@
   Then   앱에 내장된 Chromium 으로 동작한다
   ```
 
+- `FR#5` 배포한 Release 에 문제가 있으면 직전 Release 로 되돌린다 [요구사항] (`D#4`)
+
+  ```
+  Given  vBAD 가 Latest 이고 직전 Release 가 vPREV
+  When   롤백한다 (§6.2)
+  Then   vBAD 는 draft 가 되어 공개 목록·다운로드에서 빠지고 vPREV 가 Latest 다
+  And    태그 vBAD 는 남고, 고친 빌드는 다음 patch 버전 태그로 낸다
+  ```
+
 ### 3.3 비기능 요구사항
 
 - 색인 공통 제약 `NFR#11`, `NFR#12` 를 따른다
@@ -78,6 +89,25 @@
 | `D#1` | release job 이 세 build job 전부에 의존한다 | OS 별로 Release 에 바로 올림 | 일부 OS 만 빠진 Release 가 남지 않는다 |
 | `D#2` | 코드 서명하지 않는다 | 인증서 구입·서명 | 비용 발생 → 첫 실행 경고를 README 로 안내한다 |
 | `D#3` | electron-builder portable·zip·AppImage | 설치 프로그램(nsis·dmg·deb) | 설치 없이 실행한다 |
+| `D#4` | 문제 Release 는 draft 로 내리고 직전 Release 를 Latest 로 지정, 태그는 지우지 않는다 | Release·태그 삭제 후 같은 태그로 다시 빌드 / 롤백 workflow 자동화 | draft 는 `--draft=false` 로 되돌릴 수 있다. 같은 태그를 다시 쓰면 이름이 같은 다른 바이너리가 생긴다. 배포가 드물고 롤백 여부는 사람이 판단한다 |
+
+### 6.2 릴리스 확인 목록과 롤백
+
+- 태그 전 확인 (모두 이번 릴리스 대상 커밋에서 본다 → 하나라도 안 봤으면 태그를 만들지 않는다)
+  - `TC#56`: `release.yml` 수동 실행(workflow_dispatch)의 artifact 3개
+  - `TC#57`: `package.json` version 과 만들 태그가 같다
+  - `TC#58`: OS 별 실행 파일로 샘플 페이지 수집, 첫 실행 경고가 README 안내와 같다
+  - `TC#54`·`TC#55`·`TC#59`: 창 수동 TC (`docs/spec_window.md` §7)
+- 롤백 (`FR#5`, `D#4`)
+
+  ```sh
+  gh release edit vBAD --draft
+  gh release edit vPREV --latest
+  ```
+
+  - 두 명령을 모두 실행한다 → draft 로 내리기만 하면 Latest 표시가 그 draft 에 남는다
+  - 원인을 고친 뒤 다음 patch 버전으로 일반 릴리스 절차를 다시 밟는다
+  - 롤백 사실은 이슈로 남긴다 → 받은 사람에게 알릴 자리가 이슈와 다음 Release 노트뿐이다
 
 ## 7. 테스트 및 검증 기준
 
@@ -86,7 +116,9 @@
 | `TC#56` | 세 OS 산출물이 모두 만들어진다 | [FR#1, FR#2, NFR#12, D#1] | (통합 — `.github/workflows/release.yml`) 릴리스 전 workflow_dispatch 실행의 artifact 3개 확인 |
 | `TC#57` | 태그와 package.json 버전이 다르면 Release 가 없다 | [FR#3, NFR#12] | (수동) 릴리스 확인 목록: 태그 전 `package.json` version 과 태그 비교 |
 | `TC#58` | 각 OS 실행 파일이 브라우저 설치 없이 수집한다 | [FR#4, NFR#11, D#2, D#3] | (수동) 릴리스 확인 목록: OS 별 실행 파일로 샘플 페이지 수집, 첫 실행 경고가 README 안내와 같은지 확인 |
+| `TC#60` | 롤백하면 문제 Release 가 공개 목록에서 빠지고 직전 Release 가 Latest 다 | [FR#5, D#4] | (수동) 롤백할 때 `gh release list` 로 vBAD 가 Draft, vPREV 가 Latest 인지 확인 |
 
 ## 부록. 변경 이력
 
 - GH-89: 기존 동작을 as-built 로 스펙화
+- GH-94: 릴리스 확인 목록과 롤백 절차
