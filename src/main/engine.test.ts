@@ -866,6 +866,27 @@ test('TC#19 mergeAppendsWhenResuming', async () => {
   assert.equal(read(d, 'p_all.txt'), '본문 1\n\n본문 2\n\n본문 3');
 });
 
+test('TC#19 mergeKeepsAllFileUntilFirstPageIsSaved', async () => {
+  // 첫 페이지를 받지 못한 수집이 앞서 합쳐 둔 본문을 지우지 않는다.
+  const d = tempDir();
+  fixtureLink(d);
+  const prefix = path.join(d, 'out', 'p');
+  fs.mkdirSync(path.dirname(prefix));
+  write(`${prefix}_all.txt`, '이전 본문');
+  const srv = await serve(d, (_req, res) => {
+    res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(pageHtml('찾을 수 없습니다', ''));
+  });
+  try {
+    assert.equal(await scrape(`${srv.base}/a.html`, '#c', '.next', prefix, { timeout: 3000, merge: true, ...quiet }), 0);
+  } finally {
+    await srv.close();
+  }
+  await assert.rejects(scrape(pathToFileURL(path.join(d, 'none.html')).href, '#c', '.next', prefix, { timeout: 3000, merge: true, ...quiet }));
+  await assert.rejects(scrape(pathToFileURL(path.join(d, 'p1.html')).href, '#none', '.next', prefix, { timeout: 1000, merge: true, ...quiet }));
+  assert.equal(read(d, 'p_all.txt'), '이전 본문');
+});
+
 test('TC#18 excludeCoveringTargetOnLaterPageFails', async () => {
   // 다음 페이지에서 제외가 수집 대상을 가려도 타임아웃으로 감추지 않고 그 사유로 실패한다.
   const d = tempDir();
