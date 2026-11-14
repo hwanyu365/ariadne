@@ -39,6 +39,7 @@
 | probe·요소 선택기 | `docs/spec_selector.md` / `NFR#7`, `NFR#8`, `NFR#9`, `NFR#14` |
 | 창 UI·설정 저장·완료 알림 | `docs/spec_window.md` / `NFR#6`, `NFR#10`, `NFR#16`, `BR#2` |
 | 빌드·배포 | `docs/spec_release.md` / `NFR#11`, `NFR#12` |
+| 릴리스 확인 목록·롤백 | `docs/spec_release.md` §6.2 |
 
 ## 공통 제약
 
