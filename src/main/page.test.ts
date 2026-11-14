@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { pickPolicy, referrerFor } from './page';
 
-test('referrerFollowsPolicyLikeBrowser', () => {
+test('TC#28 referrerFollowsPolicyLikeBrowser', () => {
   // 브라우저가 그 정책으로 보내는 값과 같다. 정책이 없으면 기본 정책(strict-origin-when-cross-origin)이다.
   const page = 'https://a.test/ep/1?no=2#x';
   const cases: [string, string, string, string | null][] = [
@@ -34,7 +34,7 @@ test('referrerFollowsPolicyLikeBrowser', () => {
   for (const [from, to, policy, want] of cases) assert.equal(referrerFor(from, to, policy), want, `${from} -> ${to} [${policy}]`);
 });
 
-test('policyFallsThroughUnknownValues', () => {
+test('TC#28 policyFallsThroughUnknownValues', () => {
   // 요소 속성 → meta → 헤더 순으로, 아는 값이 든 첫 단계를 쓴다. 모르는 값만 있는 단계는 건너뛴다.
   assert.equal(pickPolicy('bogus', '', 'no-referrer'), 'no-referrer');
   assert.equal(pickPolicy('', 'unsafe-url', 'no-referrer'), 'unsafe-url');

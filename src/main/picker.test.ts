@@ -53,25 +53,25 @@ async function waitUi(page: Page) {
   for (let i = 0; i < 50 && !(await page.eval<number>(uiCount)); i++) await sleep(50);
 }
 
-test('pickerPrefersId', async () => {
+test('TC#35 pickerPrefersId', async () => {
   // id 가 있으면 첫 후보로 낸다. 가장 짧고 깨지지 않는다.
   const got = await on(page => candidates(page, '#tt'));
   assert.deepEqual(got[0], { sel: '#tt', n: 1 });
 });
 
-test('pickerShowsMatchCountForEachCandidate', async () => {
+test('TC#35 pickerShowsMatchCountForEachCandidate', async () => {
   // 클래스를 줄인 후보가 몇 개를 잡는지 보여 준다 → 상태 클래스가 섞였는지 드러난다.
   const got = bySel(await on(page => candidates(page, 'div.article.body')));
   assert.equal(got['div.article.body'], 1);
   assert.equal(got['div.article'], 3);
 });
 
-test('pickerSuggestsContainerForImage', async () => {
+test('TC#35 pickerSuggestsContainerForImage', async () => {
   const got = bySel(await on(page => candidates(page, '#gallery img')));
   assert.equal(got['#gallery img'], 2);
 });
 
-test('pickerExcludesOwnUiFromCount', async () => {
+test('TC#36 pickerExcludesOwnUiFromCount', async () => {
   // 선택기가 붙인 요소는 매치 수에 들어가지 않는다 → 태그만 쓴 후보에서 드러난다.
   const [before, after, ui] = await on(async page => {
     const b = await candidates(page, 'div.article.body');
@@ -84,7 +84,7 @@ test('pickerExcludesOwnUiFromCount', async () => {
   assert.equal(bySel(after)['div.article'], 3);
 });
 
-test('pickerClickReportsAndBlocksNavigation', async () => {
+test('TC#37 pickerClickReportsAndBlocksNavigation', async () => {
   // 클릭하면 후보를 돌려주고 링크 이동은 막는다.
   const [got, before, after] = await on(async (page, got) => {
     await waitUi(page);
@@ -99,7 +99,7 @@ test('pickerClickReportsAndBlocksNavigation', async () => {
   assert.equal(got[0].text, '다음');
 });
 
-test('pickerSwitchesTargetFromToolbar', async () => {
+test('TC#37 pickerSwitchesTargetFromToolbar', async () => {
   // 툴바에서 대상을 바꾸면 그 뒤의 클릭이 바뀐 대상으로 전달된다.
   const got = await on(async (page, got) => {
     await waitUi(page);
@@ -113,7 +113,7 @@ test('pickerSwitchesTargetFromToolbar', async () => {
   assert.equal(got[1].sel, 'a.next');
 });
 
-test('pickerToolbarClickIsNotTreatedAsSelection', async () => {
+test('TC#37 pickerToolbarClickIsNotTreatedAsSelection', async () => {
   const got = await on(async (page, got) => {
     await waitUi(page);
     await clickToolbar(page, '제목');
@@ -123,7 +123,7 @@ test('pickerToolbarClickIsNotTreatedAsSelection', async () => {
   assert.deepEqual(got, [], '툴바 버튼 클릭이 선택으로 전달됐다');
 });
 
-test('pickerReinstallsOnEveryDocument', async () => {
+test('TC#38 pickerReinstallsOnEveryDocument', async () => {
   // 문서가 바뀔 때마다 다시 선다. 리다이렉트·새로고침 뒤에도 선택기가 남아야 한다.
   const { d, url } = fixture();
   fs.writeFileSync(path.join(d, 'second.html'), FIXTURE);
@@ -138,7 +138,7 @@ test('pickerReinstallsOnEveryDocument', async () => {
   assert.equal(got[0]?.sel, 'div.article.body');
 });
 
-test('pickerSkipsIframes', async () => {
+test('TC#38 pickerSkipsIframes', async () => {
   // iframe 에는 붙지 않는다. 광고마다 툴바가 뜨면 페이지를 쓸 수 없다.
   const { d } = fixture('<meta charset="utf-8"><body><a id="ad" href="/x">광고</a></body>', 'inner.html');
   fs.writeFileSync(path.join(d, 'outer.html'), FIXTURE.replace('</body>', '<iframe src="inner.html" width="200" height="80"></iframe></body>'));
@@ -152,7 +152,7 @@ test('pickerSkipsIframes', async () => {
   assert.equal(frame, 0, 'iframe 에 붙었다');
 });
 
-test('pickerChannelHiddenFromPageScripts', async () => {
+test('TC#39 pickerChannelHiddenFromPageScripts', async () => {
   // 선택 결과 통로는 격리 world 에만 있다 → 대상 페이지의 스크립트가 가짜 선택을 보낼 수 없다.
   const seen = await on(async page => {
     await waitUi(page);
@@ -161,7 +161,7 @@ test('pickerChannelHiddenFromPageScripts', async () => {
   assert.equal(seen, 'undefined,undefined');
 });
 
-test('pickerIgnoresSyntheticClicks', async () => {
+test('TC#39 pickerIgnoresSyntheticClicks', async () => {
   // 대상 페이지가 합성한 클릭은 선택·완료로 세지 않는다. 핸들러는 격리 world 에 있어도 DOM 이벤트는 페이지가 만들 수 있다.
   let done = false;
   const got: unknown[] = [];
@@ -179,7 +179,7 @@ test('pickerIgnoresSyntheticClicks', async () => {
   assert.equal(done, false);
 });
 
-test('pickerIgnoresOtherWindowsPicks', async () => {
+test('TC#39 pickerIgnoresOtherWindowsPicks', async () => {
   // 선택 통로는 앱 전역이다 → 한 선택기 창의 클릭이 다른 선택기의 콜백으로 가지 않는다.
   const got = { a: [] as unknown[], b: [] as unknown[] };
   const open = (key: 'a' | 'b') => Page.open({ picker: { targets: ['본문'], onPick: p => got[key].push(p), onDone: () => {} } });

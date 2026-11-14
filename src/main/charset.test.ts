@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { charsetWarning, checkCharset } from './charset';
 
-test('charsetNameChecked', () => {
+test('TC#23 charsetNameChecked', () => {
   assert.equal(checkCharset('  '), null);
   assert.equal(checkCharset(' utf-8 '), 'utf-8');
   assert.equal(checkCharset('euc-kr'), 'euc-kr');
@@ -12,7 +12,7 @@ test('charsetNameChecked', () => {
   }
 });
 
-test('charsetWarningJudgesOriginalBytes', () => {
+test('TC#20 charsetWarningJudgesOriginalBytes', () => {
   const utf8 = Buffer.from('본문 가나다');
   assert.match(charsetWarning('windows-1252', utf8, null) ?? '', /windows-1252/);
   assert.match(charsetWarning('EUC-KR', utf8, 'euc-kr') ?? '', /'euc-kr'.*EUC-KR/);
