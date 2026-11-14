@@ -71,6 +71,35 @@ test('TC#35 pickerSuggestsContainerForImage', async () => {
   assert.equal(got['#gallery img'], 2);
 });
 
+test('TC#65 pickerPutsImageContainerFirst', async () => {
+  const html = `<meta charset="utf-8"><body>
+<div id="g"><img id="x" class="cut" src="a.png"><img class="cut" src="b.png"></div>
+<section class="list wide"><p><img class="cut" id="y" src="c.png"></p><p><img src="d.png"></p></section>
+<span><img id="z" src="e.png"></span><img src="f.png">
+</body>`;
+  const got = await on(async page => [
+    await candidates(page, '#x'), await candidates(page, '#y'), await candidates(page, '#z'),
+  ], false, fixture(html).url);
+  assert.deepEqual(got[0][0], { sel: '#g img', n: 2 });
+  assert.ok(got[0].findIndex(c => c.sel === '#x') > 0, '한 장짜리 후보가 빠졌다');
+  assert.deepEqual(got[1][0], { sel: 'section.list.wide img', n: 2 });
+  assert.deepEqual(got[2][0], { sel: 'img', n: 6 });
+  assert.ok(got[2].some(c => c.sel === '#z'), '한 장짜리 후보가 빠졌다');
+});
+
+test('TC#65 pickerFillsImageContainerOnClick', async () => {
+  const html = `<meta charset="utf-8"><body style="margin:40px 300px 300px 40px">
+<div id="g"><img id="x" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="80" height="80"><img src="b.png"></div>
+</body>`;
+  const got = await on(async (page, got) => {
+    await waitUi(page);
+    await page.click('#x');
+    await sleep(300);
+    return got as { sel: string }[];
+  }, true, fixture(html).url);
+  assert.equal(got[0]?.sel, '#g img');
+});
+
 test('TC#36 pickerExcludesOwnUiFromCount', async () => {
   // 선택기가 붙인 요소는 매치 수에 들어가지 않는다 → 태그만 쓴 후보에서 드러난다.
   const [before, after, ui] = await on(async page => {

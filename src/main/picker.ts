@@ -51,20 +51,23 @@ export const CANDIDATES_JS = `el => {
   const add = s => { if (s && out.indexOf(s) < 0) out.push(s); };
   const tag = el.tagName.toLowerCase();
 
+  if (tag === 'img') {
+    // 이미지는 그 한 장이 아니라 컨테이너를 집어야 다음 페이지에서도 맞는다 → 입력란에 채워지는 첫 후보로 둔다.
+    const up = test => {
+      for (let p = el.parentElement; p && p !== document.documentElement; p = p.parentElement) if (test(p)) return p;
+      return null;
+    };
+    const byId = up(p => p.id);
+    const byClass = byId ? null : up(p => classesOf(p).length);
+    add(byId ? '#' + esc(byId.id) + ' img'
+      : byClass ? byClass.tagName.toLowerCase() + '.' + classesOf(byClass).map(esc).join('.') + ' img'
+      : 'img');
+  }
   if (el.id) add('#' + esc(el.id));
   const cs = classesOf(el);
   if (cs.length) {
     add(tag + '.' + cs.map(esc).join('.'));
     if (cs.length > 1) add(tag + '.' + esc(cs[0]));   // 상태 클래스가 섞였을 때를 위한 짧은 쪽
-  }
-  if (tag === 'img') {
-    // 이미지는 그 한 장이 아니라 컨테이너를 집어야 다음 페이지에서도 맞는다.
-    const p = el.parentElement;
-    if (p) {
-      if (p.id) add('#' + esc(p.id) + ' img');
-      const pcs = classesOf(p);
-      if (pcs.length) add(p.tagName.toLowerCase() + '.' + pcs.map(esc).join('.') + ' img');
-    }
   }
   add(tag);
 
