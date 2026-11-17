@@ -325,7 +325,7 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
   let last = '';
   // 장편은 본문 전체를 쌓으면 메모리가 커진다 → 해시만 남긴다.
   const seen = new Set<string>();
-  const keyOf = (v: string) => sha1(`${page.url()}\n${v}`);
+  const keyOf = (url: string, v: string) => sha1(`${url}\n${v}`);
   let firstKey = '', prevUrl = '';
   const moves = new Set<string>();
   const page = await env.open({ show: !!o.headful, charset });
@@ -344,9 +344,9 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
       pages++;
       const num = start + pages - 1;
       // 주소까지 보아야 다른 페이지의 같은 본문(삽화·휴재 공지)에서 멈추지 않는다.
-      seen.add(await keyOf(current));
-      if (pages === 1) firstKey = await keyOf(current);
       prevUrl = page.url();
+      seen.add(await keyOf(prevUrl, current));
+      if (pages === 1) firstKey = await keyOf(prevUrl, current);
       const here = `${num}번 ${page.url()}`;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
@@ -415,9 +415,11 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
         next = got;
       }
       // 주소가 그대로면 본문만 남는다 → 중간의 같은 본문(삽화)에서 멈추지 않게, 첫 페이지로 돌아오거나 같은 넘어감이 다시 나올 때만 본다.
-      const key = await keyOf(next);
-      const move = await keyOf(`${current}\n→\n${next}`);
-      if (page.url() === prevUrl ? key === firstKey || moves.has(move) : seen.has(key)) {
+      // 해시는 비동기다 → 주소를 한 번만 읽어 두 키와 비교가 같은 주소를 쓰게 한다.
+      const at = page.url();
+      const key = await keyOf(at, next);
+      const move = await keyOf(at, `${current}\n→\n${next}`);
+      if (at === prevUrl ? key === firstKey || moves.has(move) : seen.has(key)) {
         log('  중단: next 가 이미 받은 페이지로 돌아왔습니다. 마지막 페이지로 봅니다.');
         break;
       }
