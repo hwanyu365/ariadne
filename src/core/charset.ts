@@ -15,7 +15,7 @@ export function checkCharset(name: string): string | null {
 }
 
 /** 틀린 인코딩으로 읽어도 수집은 깨진 채 성공한다 → 조용히 지나가지 않게 로그 문구를 만든다. */
-export function charsetWarning(actual: string, body: Buffer, charset: string | null): string | null {
+export function charsetWarning(actual: string, body: Uint8Array, charset: string | null): string | null {
   // 브라우저가 고른 인코딩 이름으로는 판정할 수 없다. 선언이 없을 때 쓰는 기본값이 환경에 따라 바뀐다.
   // 비ASCII 를 담은 올바른 UTF-8 바이트가 다른 인코딩의 글이기는 어렵다 → 원래 바이트로 판정한다.
   if (actual === 'UTF-8' || body.every(b => b < 0x80)) return null;

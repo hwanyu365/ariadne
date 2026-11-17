@@ -2,7 +2,8 @@ import { BrowserWindow, dialog, ipcMain, Notification, screen, shell } from 'ele
 import fs from 'node:fs';
 import path from 'node:path';
 import { pick, probe, scrape } from './engine';
-import { cleanSettings, DEFAULTS, HINT, InputError, loadSettings, logLevel, parseInputs, pickUpdate, progress, remember, saveSettings, siteFor, windowHeight, type Raw } from './form';
+import { cleanSettings, DEFAULTS, HINT, InputError, logLevel, parseInputs, pickUpdate, progress, remember, siteFor, type Raw } from '../core/form';
+import { loadSettings, saveSettings, windowHeight } from './settings';
 
 export type Kind = 'scrape' | 'probe' | 'pick';
 export interface StartRequest { kind: Kind; values: Raw; mode: 'text' | 'image'; headful: boolean; merge?: boolean }
