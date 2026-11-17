@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { BrowserWindow } from 'electron';
 import { type Handler, serve, staticFile, tempDir } from '../test/serve';
-import { probe, reachable, scrape, type ScrapeOptions } from './engine';
+import { fsSink, probe, reachable, scrape, type ScrapeOptions } from './engine';
 import { Page } from './page';
 
 const PNG = Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n', 'latin1'), Buffer.from('fixture'.repeat(4))]);
@@ -130,6 +130,27 @@ test('TC#4 disabledNextFollowsHref', async () => {
   const { n, texts } = await run(fixtureDisabledButHref);
   assert.equal(n, 3);
   assert.deepEqual(texts, ['본문 1', '본문 2', '본문 3']);
+});
+
+test('TC#14 fsSinkWritesAtPrefixPath', async () => {
+  const d = tempDir();
+  const plain = fsSink(path.join(d, 'sub', 'p'));
+  assert.equal(plain.base, 'p');
+  await plain.write('p_0001.txt', 'a');
+  assert.equal(fs.readFileSync(path.join(d, 'sub', 'p_0001.txt'), 'utf8'), 'a');
+  assert.deepEqual(await plain.list(), ['p_0001.txt']);
+
+  // 구분자로 끝나는 접두사는 이름 앞부분이 비고, 폴더는 접두사의 dirname 에서 만들고 읽는다.
+  const slash = fsSink(path.join(d, 'out') + path.sep);
+  assert.equal(slash.base, '');
+  assert.equal(fs.existsSync(path.join(d, 'out')), false);
+  assert.ok((await slash.list()).includes('sub'));
+  fs.mkdirSync(path.join(d, 'out'));
+  await slash.write('_0001.txt', 'b');
+  await slash.append('_0001.txt', 'c');
+  assert.equal(fs.readFileSync(path.join(d, 'out', '_0001.txt'), 'utf8'), 'bc');
+  assert.equal(await slash.exists('_0001.txt'), true);
+  assert.equal(await slash.size('_0001.txt'), 2);
 });
 
 test('TC#14 digitsAndStart', async () => {

@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { tempDir } from '../test/serve';
 import { Page } from './page';
-import { CANDIDATES_JS } from './picker';
+import { CANDIDATES_JS } from '../core/picker';
 
 const FIXTURE = `<meta charset="utf-8"><body style="margin:40px 300px 300px 40px">
 <h1 id="tt">제목</h1>
