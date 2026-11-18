@@ -34,6 +34,8 @@ export interface Page {
   closed(): boolean;
   whenClosed(): Promise<void>;
   close(): void;
+  /** 플랫폼이 페이지를 잃으면 멈춘 사유 문장을 reason 으로 중단한다. */
+  readonly interrupted?: AbortSignal;
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));

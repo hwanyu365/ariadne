@@ -44,6 +44,8 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      # 확장 테스트는 Playwright 의 Chromium 에 확장을 올린다 → 브랜드 Chrome 은 명령줄로 확장을 올리지 못한다.
+      - run: npx playwright-core install --with-deps chromium
       # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스가 뜨지 않는다.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # 비밀값 없이 실행한다 → fork PR 에서도 같은 결과여야 한다. 로컬과 같은 명령을 화면 없는 X 서버에서 돌린다.

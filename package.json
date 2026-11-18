@@ -5,16 +5,18 @@
   "private": true,
   "main": "dist/main/main.js",
   "scripts": {
-    "build": "tsc",
-    "start": "tsc && electron .",
-    "test": "tsc && electron dist/test-runner.js",
+    "build": "tsc && tsc -p tsconfig.ext.json",
+    "start": "npm run build && electron .",
+    "test": "npm run build && electron dist/test-runner.js",
     "verify": "npm test",
-    "dist": "tsc && electron-builder --publish never"
+    "dist": "npm run build && electron-builder --publish never"
   },
   "devDependencies": {
+    "@types/chrome": "0.3.7",
     "@types/node": "24.19.0",
     "electron": "45.2.3",
     "electron-builder": "26.18.0",
+    "playwright-core": "1.64.1",
     "typescript": "7.0.2"
   },
   "author": "hwanyu365",
@@ -29,6 +31,7 @@
       "dist/**/*",
       "!dist/**/*.test.js",
       "!dist/test/**",
+      "!dist/ext/**",
       "!dist/test-runner.js",
       "static/**/*",
       "assets/**/*",

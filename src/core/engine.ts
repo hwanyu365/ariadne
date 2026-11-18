@@ -1,6 +1,6 @@
-import { charsetWarning } from './charset';
-import { type OpenOptions, type Page, pickPolicy } from './page';
-import { IMAGE_CANDIDATES_JS, NEXT_CANDIDATES_JS, TEXT_CANDIDATES_JS } from './picker';
+import { charsetWarning } from './charset.js';
+import { type OpenOptions, type Page, pickPolicy } from './page.js';
+import { IMAGE_CANDIDATES_JS, NEXT_CANDIDATES_JS, TEXT_CANDIDATES_JS } from './picker.js';
 
 export type Log = (msg: string) => void;
 
@@ -329,6 +329,8 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
   let firstKey = '', prevUrl = '';
   const moves = new Set<string>();
   const page = await env.open({ show: !!o.headful, charset });
+  const signal = page.interrupted && o.signal ? AbortSignal.any([o.signal, page.interrupted]) : page.interrupted ?? o.signal;
+  const stopped = () => page.interrupted?.aborted ? String(page.interrupted.reason) : '사용자 중지.';
   try {
     await page.goto(url, timeout);
     // 이어 받기 주소도 오류일 수 있다 → next 로 넘어간 문서와 같이 오류 페이지를 본문으로 저장하지 않는다.
@@ -350,7 +352,7 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
       const here = `${num}번 ${page.url()}`;
       // 중간에 끊겨도 여기까지 받은 건 남도록 페이지마다 바로 쓴다.
       if (images) {
-        const n = await saveImages(page, current.split('\n').filter(Boolean), await imagePolicies(page, sel), sink, num, digits, log, timeout, o.signal);
+        const n = await saveImages(page, current.split('\n').filter(Boolean), await imagePolicies(page, sel), sink, num, digits, log, timeout, signal);
         log(`[${pages}] 이미지 ${n}장 -> ${sink.base}_${pad(num, digits)}_*`);
       } else {
         const { size, name, body } = await saveText(page, current, sink, num, digits, titleSel, log);
@@ -373,25 +375,25 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
       // 이어 받기 기준이므로 저장을 마친 페이지만 남긴다.
       last = here;
 
-      if (o.signal?.aborted) {
-        log('  중단: 사용자 중지.');
+      if (signal?.aborted) {
+        log(`  중단: ${stopped()}`);
         break;
       }
       if (maxPages && pages >= maxPages) break;
       // 왜 멈췄는지 남긴다. 셀렉터 오타로 1페이지만 받고 끝나는 게 가장 흔한 사고다.
       const docs = page.documents();
-      const why = await unlessStopped(gotoNext(page, nextSel, timeout), o.signal);
+      const why = await unlessStopped(gotoNext(page, nextSel, timeout), signal);
       if (why === STOP) {
-        log('  중단: 사용자 중지.');
+        log(`  중단: ${stopped()}`);
         break;
       }
       if (why) {
         log(`  중단: ${why}${pages === 1 ? ' 셀렉터를 probe 로 확인하세요.' : ''}`);
         break;
       }
-      let next = await waitChange(page, sel, current, timeout, read, o.signal);
-      if (o.signal?.aborted) {
-        log('  중단: 사용자 중지.');
+      let next = await waitChange(page, sel, current, timeout, read, signal);
+      if (signal?.aborted) {
+        log(`  중단: ${stopped()}`);
         break;
       }
       // 문서가 그대로인 SPA 는 지난 문서의 상태를 들고 있다 → 새 문서를 받았을 때만 상태를 본다.
@@ -407,9 +409,9 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
       }
       if (images) {
         // 바뀐 것만 보고 넘어가면 아직 주소가 안 붙은 지연 이미지를 놓친다.
-        const got = await unlessStopped(scrollFor(page, log, sel).then(() => read(page, sel, timeout)), o.signal);
+        const got = await unlessStopped(scrollFor(page, log, sel).then(() => read(page, sel, timeout)), signal);
         if (got === STOP) {
-          log('  중단: 사용자 중지.');
+          log(`  중단: ${stopped()}`);
           break;
         }
         next = got;
@@ -425,12 +427,16 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
       }
       moves.add(move);
       current = next;
-      if (delay) await sleep(delay, o.signal);
-      if (o.signal?.aborted) {
-        log('  중단: 사용자 중지.');
+      if (delay) await sleep(delay, signal);
+      if (signal?.aborted) {
+        log(`  중단: ${stopped()}`);
         break;
       }
     }
+  } catch (e) {
+    // 탭을 잃으면 진행 중이던 평가·요청도 실패한다 → 그 실패가 아니라 탭을 잃은 사유로 멈춘다.
+    if (!page.interrupted?.aborted) throw e;
+    log(`  중단: ${stopped()}`);
   } finally {
     if (last) log(`  마지막으로 받은 페이지: ${last}`);
     page.close();
