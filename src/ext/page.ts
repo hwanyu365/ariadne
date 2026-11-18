@@ -31,6 +31,7 @@ export class DebuggerPage extends CdpPage {
   private cleanup: (() => void)[] = [];
   private loaded: (() => void) | null = null;
   private pickerWorld = 0;
+  private pickerSetup = '';
 
   readonly interrupted = this.lost.signal;
 
@@ -84,7 +85,8 @@ export class DebuggerPage extends CdpPage {
     // 디버거가 밖에서 떨어지면 패널은 이 탭에 아무것도 실행할 수 없다 → 패널의 신호가 끊기면 선택기가 스스로 걷는다.
     const alive = `window.__ariadneAlive = Date.now(); setInterval(() => { if (Date.now() - window.__ariadneAlive > ${ALIVE_GAP} && window.__ariadnePickerOff) window.__ariadnePickerOff(); }, 1000);`;
     // 새 문서 스크립트는 문서가 만들어지기 전에 돈다 → 선택기 UI 는 DOM 이 준비된 뒤 세운다.
-    const setup = `const setup = () => ${pickerSetupJs(picker.targets)}; if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup, { once: true }); else setup();`;
+    this.pickerSetup = pickerSetupJs(picker.targets);
+    const setup = `const setup = () => ${this.pickerSetup}; if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup, { once: true }); else setup();`;
     await this.send('Page.addScriptToEvaluateOnNewDocument', { source: `${bridge}\n${alive}\n${setup}`, worldName: WORLD });
     this.keepAlive();
   }
@@ -94,7 +96,9 @@ export class DebuggerPage extends CdpPage {
     const tick = async () => {
       if (this.detached) return;
       if (this.pickerWorld) {
-        await this.send('Runtime.evaluate', { expression: 'window.__ariadneAlive = Date.now()', contextId: this.pickerWorld }).catch(async () => {
+        // 탭이 멈추거나 시계가 뛰면 연결이 살아 있어도 선택기가 스스로 걷힌다 → 연결된 동안은 다시 세운다.
+        const expression = `window.__ariadneAlive = Date.now(); if (!window.__ariadnePicker && document.readyState !== 'loading') ${this.pickerSetup};`;
+        await this.send('Runtime.evaluate', { expression, contextId: this.pickerWorld }).catch(async () => {
           // 문서가 바뀌는 중에도 이 평가는 실패한다 → 디버거가 떨어졌는지는 따로 본다.
           await this.send('Runtime.evaluate', { expression: '0' }).catch(() => {
             this.lose('디버깅 연결이 해제되었습니다.');

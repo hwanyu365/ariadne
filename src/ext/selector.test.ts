@@ -138,6 +138,36 @@ test('TC#75 extPickerCleansUpWhenDebuggerIsDetachedOutside', async () => {
   }
 });
 
+test('TC#75 extPickerComesBackWhenRemovedWhileConnected', async () => {
+  // 탭이 몇 초 멈추거나 시계가 뛰면 연결이 살아 있어도 선택기가 스스로 걷힐 수 있다 → 그 상태를 직접 만든다.
+  const s = await site(pickable);
+  try {
+    const { done } = await s.x.pick(s.tab, `${s.base}/a.html`);
+    await s.x.panel.evaluate(async t => {
+      const contexts: { id: number; name: string; auxData?: { frameId?: string } }[] = [];
+      const on = (src: chrome.debugger.Debuggee, method: string, ev?: any) => { if (src.tabId === t && method === 'Runtime.executionContextCreated') contexts.push(ev.context); };
+      chrome.debugger.onEvent.addListener(on);
+      const send = (m: string, p?: object) => chrome.debugger.sendCommand({ tabId: t }, m, p) as Promise<any>;
+      const main = (await send('Page.getFrameTree')).frameTree.frame.id;
+      // 이미 켜진 Runtime 을 다시 켜면 있는 world 를 다시 알린다.
+      await send('Runtime.disable');
+      await send('Runtime.enable');
+      chrome.debugger.onEvent.removeListener(on);
+      const world = contexts.find(c => c.name === 'ariadne' && c.auxData?.frameId === main)!;
+      await send('Runtime.evaluate', { contextId: world.id, expression: 'window.__ariadnePickerOff()' });
+    }, s.tab.id);
+    assert.equal(await uiCount(s.tab), 0);
+    await s.tab.page.waitForFunction(() => !!document.querySelector('[data-ariadne-ui] button'), undefined, { timeout: 5000, polling: 100 });
+    await s.x.clickAt(s.tab, '#c');
+    await s.x.panel.waitForFunction(() => ariadne.picks.length > 0, undefined, { timeout: 5000 });
+    await s.x.panel.evaluate(() => ariadne.stop());
+    assert.equal((await done).error, null);
+  } finally {
+    await s.x.panel.evaluate(() => ariadne.stop());
+    await s.close();
+  }
+});
+
 test('TC#76 extPickerFollowsUserNavigationAndCharset', async () => {
   const s = await site({
     ...pickable,
