@@ -36,6 +36,7 @@
 | 페이지 인코딩 | `docs/spec_collect.md` FR#11~FR#12 / `NFR#9` |
 | 이미지 저장·Referer | `docs/spec_collect.md` FR#13~FR#16 / `NFR#4`, `NFR#5` |
 | Chrome 확장의 탭 수집·저장 | `docs/spec_collect.md` FR#19~FR#23, §6.4 / `NFR#17` |
+| Chrome 확장의 probe·선택기 | `docs/spec_selector.md` FR#8~FR#10 / `NFR#17` |
 | 수집 창의 원격 페이지 경계 | `docs/spec_collect.md` FR#17~FR#18, `docs/spec_selector.md` FR#6~FR#7 / `NFR#11`, `NFR#13` |
 | probe·요소 선택기 | `docs/spec_selector.md` / `NFR#7`, `NFR#8`, `NFR#9`, `NFR#14` |
 | 창 UI·설정 저장·완료 알림 | `docs/spec_window.md` / `NFR#6`, `NFR#10`, `NFR#16`, `BR#2` |
@@ -139,6 +140,8 @@
   - 엔진은 사이드 패널에서 돈다 → 패널을 닫으면 수집이 멈추고 디버거를 뗀다.
   - 수집 중 대상 탭이 아닌 탭·창은 건드리지 않는다. 대상 탭이 연 새 탭·창만 닫는다.
   - 받은 파일은 사용자가 고른 폴더 안의 접두사 경로에 쓴다 (`BR#2`).
+  - 선택기의 선택 통로는 대상 탭 문서의 격리 world 에만 있고 사람이 누른 클릭만 받는다 → 페이지 스크립트가 가짜 선택·완료를 보내지 못한다 (`NFR#13` 과 같은 경계).
+  - 선택기를 마치면 대상 탭에서 선택기를 걷는다 → 사용자의 탭이 원래대로 동작한다.
   - 모든 사이트 접근 권한을 받는다 → 사용자가 보는 어느 사이트에서든 수집하고, 다른 서버의 이미지도 탭의 쿠키와 브라우저와 같은 Referer 로 받는다 (`NFR#5`).
 
 ## 제외 범위

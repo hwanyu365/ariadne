@@ -9,7 +9,7 @@ export const NUM_FIELDS = [
   ['delay', '페이지 간 대기 ms', '0'],
 ] as const;
 
-type TextKey = (typeof TEXT_KEYS)[number];
+export type TextKey = (typeof TEXT_KEYS)[number];
 type NumKey = (typeof NUM_FIELDS)[number][0];
 export type Raw = Record<TextKey | NumKey, string>;
 export type Mode = 'text' | 'image';

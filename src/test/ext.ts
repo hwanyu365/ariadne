@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { type BrowserContext, chromium, type Page as PwPage } from 'playwright-core';
-import type { RunOptions, RunResult } from '../ext/api';
+import type { PickInput, ProbeRunOptions, RunOptions, RunResult } from '../ext/api';
 
 export const EXT_DIR = path.join(__dirname, '..', '..', 'ext');
 
@@ -123,6 +123,27 @@ export class Ext {
       fs.writeFileSync(path.join(root, rel), Buffer.from(b64, 'base64'));
     }
     return got;
+  }
+
+  /** started 는 probe 를 보낸 직후에 부른다. */
+  async probe(tab: Tab, url: string, sel: string | null, nextSel: string | null, opts: ProbeRunOptions = {}, started?: () => void): Promise<RunResult> {
+    const running = this.panel.evaluate(input => { ariadne.logs.length = 0; return ariadne.probe(input); }, { tabId: tab.id, url, sel, nextSel, opts });
+    started?.();
+    return running;
+  }
+
+  /** 선택기를 열고, 툴바가 그 탭에 뜰 때까지 기다린다. done 은 선택기가 끝날 때 풀린다. */
+  async pick(tab: Tab, url: string, opts: PickInput['opts'] = {}, panel = this.panel): Promise<{ done: Promise<RunResult> }> {
+    const done = panel.evaluate(input => { ariadne.logs.length = 0; ariadne.picks.length = 0; return ariadne.pick(input); }, { tabId: tab.id, url, opts });
+    await Promise.race([tab.page.waitForFunction(() => !!document.querySelector('[data-ariadne-ui] button'), undefined, { timeout: 10000, polling: 50 }), done]);
+    // promise 를 그대로 돌려주면 await 가 풀어 버린다 → 끝날 때를 기다릴 수 있게 감싼다.
+    return { done };
+  }
+
+  /** 사람이 누른 것처럼 요소의 가운데를 누른다. 가려진 창은 그리기가 멈춰 Playwright 의 누를 수 있는지 판정을 쓰지 않는다. */
+  async clickAt(tab: Tab, selector: string): Promise<void> {
+    const r = await tab.page.evaluate(s => { const e = document.querySelector(s)!; e.scrollIntoView({ block: 'center' }); const b = e.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }, selector);
+    await tab.page.mouse.click(r[0], r[1]);
   }
 
   /** 진행 중인 수집의 로그에 pattern 이 나올 때까지 기다린다. */

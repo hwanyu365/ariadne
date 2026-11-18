@@ -1,11 +1,17 @@
 import { checkCharset } from '../core/charset.js';
 import type { Log } from '../core/engine.js';
-import { CdpPage, type OpenOptions, referrerFor, type Send } from '../core/page.js';
+import { CdpPage, type OpenOptions, type PickerHooks, referrerFor, type Send } from '../core/page.js';
+import { pickerSetupJs } from '../core/picker.js';
 import { setTimer } from './timers.js';
 
 const RULE_IDS = [1, 2, 3];
 const LINK = new Set(['link', 'form_submit']);
 const NULL_BODY = [101, 204, 205, 304];
+// 선택기를 세우는 격리 world 이름이다. 통로 바인딩은 이 이름의 world 에만 생긴다.
+const WORLD = 'ariadne';
+const BIND = '__ariadneBind';
+const ALIVE_EVERY = 1000;
+const ALIVE_GAP = 3000;
 
 /** 사용자가 대상 탭을 직접 옮긴 이동인지. 페이지 안 링크를 사람이 누른 것은 next 누르기와 가를 수 없다. */
 function userNavigation(transitionType: string, qualifiers: string[]): boolean {
@@ -24,6 +30,7 @@ export class DebuggerPage extends CdpPage {
   private markGone!: () => void;
   private cleanup: (() => void)[] = [];
   private loaded: (() => void) | null = null;
+  private pickerWorld = 0;
 
   readonly interrupted = this.lost.signal;
 
@@ -48,11 +55,57 @@ export class DebuggerPage extends CdpPage {
       await send('Emulation.setFocusEmulationEnabled', { enabled: true });
       await send('Page.setWebLifecycleState', { state: 'active' });
       await send('Fetch.enable', { patterns: [{ resourceType: 'Document', requestStage: 'Response' }] });
+      if (opts.picker) await page.installPicker(opts.picker);
       return page;
     } catch (e) {
       page.close();
       throw e;
     }
+  }
+
+  /** 문서마다 격리 world 에 선택기를 세우고, 그 world 에서만 부를 수 있는 바인딩으로 선택을 받는다. */
+  private async installPicker(picker: PickerHooks) {
+    const tabId = this.tabId;
+    const onEvent = (src: chrome.debugger.Debuggee, method: string, ev?: any) => {
+      if (src.tabId !== tabId) return;
+      if (method === 'Runtime.executionContextCreated' && ev.context.name === WORLD && ev.context.auxData?.frameId === this.main) this.pickerWorld = ev.context.id;
+      else if (method === 'Runtime.bindingCalled' && ev.name === BIND) {
+        const msg = JSON.parse(ev.payload);
+        if (msg.kind === 'done') picker.onDone();
+        else picker.onPick(msg.payload);
+      }
+    };
+    chrome.debugger.onEvent.addListener(onEvent);
+    this.cleanup.push(() => chrome.debugger.onEvent.removeListener(onEvent));
+    await this.send('Runtime.enable');
+    await this.send('Runtime.addBinding', { name: BIND, executionContextName: WORLD });
+    // 선택기 스크립트는 선택·완료를 전역 함수로 부른다 → 이 world 안에서만 바인딩으로 잇는다.
+    const bridge = `window.__ariadne_pick = p => ${BIND}(JSON.stringify({ kind: 'pick', payload: p })); window.__ariadne_done = () => ${BIND}('{"kind":"done"}');`;
+    // 디버거가 밖에서 떨어지면 패널은 이 탭에 아무것도 실행할 수 없다 → 패널의 신호가 끊기면 선택기가 스스로 걷는다.
+    const alive = `window.__ariadneAlive = Date.now(); setInterval(() => { if (Date.now() - window.__ariadneAlive > ${ALIVE_GAP} && window.__ariadnePickerOff) window.__ariadnePickerOff(); }, 1000);`;
+    // 새 문서 스크립트는 문서가 만들어지기 전에 돈다 → 선택기 UI 는 DOM 이 준비된 뒤 세운다.
+    const setup = `const setup = () => ${pickerSetupJs(picker.targets)}; if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup, { once: true }); else setup();`;
+    await this.send('Page.addScriptToEvaluateOnNewDocument', { source: `${bridge}\n${alive}\n${setup}`, worldName: WORLD });
+    this.keepAlive();
+  }
+
+  /** 선택기에 살아 있다는 신호를 보낸다. 디버거가 밖에서 떨어졌으면 페이지를 잃은 것으로 끝낸다. */
+  private keepAlive() {
+    const tick = async () => {
+      if (this.detached) return;
+      if (this.pickerWorld) {
+        await this.send('Runtime.evaluate', { expression: 'window.__ariadneAlive = Date.now()', contextId: this.pickerWorld }).catch(async () => {
+          // 문서가 바뀌는 중에도 이 평가는 실패한다 → 디버거가 떨어졌는지는 따로 본다.
+          await this.send('Runtime.evaluate', { expression: '0' }).catch(() => {
+            this.lose('디버깅 연결이 해제되었습니다.');
+            this.finish();
+          });
+        });
+      }
+      if (!this.detached) cancel = setTimer(() => void tick(), ALIVE_EVERY);
+    };
+    let cancel = setTimer(() => void tick(), ALIVE_EVERY);
+    this.cleanup.push(() => cancel());
   }
 
   private listen(charset: string | null) {
@@ -99,12 +152,15 @@ export class DebuggerPage extends CdpPage {
     if (!this.lost.signal.aborted) this.lost.abort(why);
   }
 
-  private finish() {
+  /** released 가 풀리면 디버거가 떨어진 것으로 알린다. */
+  private finish(released: Promise<unknown> = Promise.resolve()) {
     if (this.detached) return;
     this.detached = true;
     this.cleanup.forEach(f => f());
-    this.onAttach(false);
-    this.markGone();
+    void released.then(() => {
+      this.onAttach(false);
+      this.markGone();
+    });
   }
 
   url(): string {
@@ -171,8 +227,11 @@ export class DebuggerPage extends CdpPage {
 
   close(): void {
     if (this.detached) return;
-    this.finish();
-    chrome.debugger.detach({ tabId: this.tabId }).catch(() => {});
+    // 탭은 사용자가 계속 쓴다 → 떼기 전에 선택기를 걷는다.
+    const off = this.pickerWorld
+      ? this.send('Runtime.evaluate', { expression: 'window.__ariadnePickerOff && window.__ariadnePickerOff()', contextId: this.pickerWorld }).catch(() => {})
+      : Promise.resolve();
+    this.finish(off.then(() => chrome.debugger.detach({ tabId: this.tabId }).catch(() => {})));
   }
 }
 

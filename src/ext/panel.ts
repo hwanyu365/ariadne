@@ -1,6 +1,7 @@
-import { scrape } from '../core/engine.js';
-import type { PanelApi } from './api.js';
-import { extEnv } from './env.js';
+import { pick, probe, scrape } from '../core/engine.js';
+import { pickUpdate } from '../core/form.js';
+import type { PanelApi, Picked } from './api.js';
+import { extEnv, tabOpener } from './env.js';
 import { installTimers } from './timers.js';
 
 installTimers();
@@ -16,30 +17,62 @@ function connect() {
 }
 connect();
 const logs: string[] = [];
+const picks: Picked[] = [];
 let ctl: AbortController | null = null;
 
+const onLog = (m: string) => { logs.push(m); };
+
+/** 엔진 호출 하나를 감싼다. 로그를 비우고, 중지 신호를 주고, 예외를 실패 줄로 바꾸고, 디버거가 떨어진 뒤에 끝난다. */
+async function session(tabId: number, body: (opener: ReturnType<typeof tabOpener>, signal: AbortSignal) => Promise<number>) {
+  logs.length = 0;
+  ctl = new AbortController();
+  const attached = (on: boolean) => {
+    if (on) held.add(tabId);
+    else held.delete(tabId);
+    port.postMessage({ tabId, attached: on });
+  };
+  const opener = tabOpener(tabId, onLog, attached);
+  try {
+    const pages = await body(opener, ctl.signal);
+    return { pages, error: null, logs: [...logs] };
+  } catch (e) {
+    const error = String(e instanceof Error ? e.message : e).split('\n')[0];
+    return { pages: 0, error, logs: [...logs, `실패: ${error}`] };
+  } finally {
+    // 엔진은 페이지를 닫고 바로 돌아온다 → 디버거가 실제로 떨어진 뒤에 끝났다고 알린다.
+    await opener.settled();
+    ctl = null;
+  }
+}
+
 globalThis.ariadne = {
-  async run(input, root) {
-    logs.length = 0;
-    ctl = new AbortController();
-    const onLog = (m: string) => { logs.push(m); };
-    const attached = (on: boolean) => {
-      if (on) held.add(input.tabId);
-      else held.delete(input.tabId);
-      port.postMessage({ tabId: input.tabId, attached: on });
-    };
-    try {
-      const pages = await scrape(extEnv(input.tabId, root, onLog, attached), input.url, input.sel, input.nextSel, input.prefix, { ...input.opts, signal: ctl.signal, onLog });
-      return { pages, error: null, logs: [...logs] };
-    } catch (e) {
-      const error = String(e instanceof Error ? e.message : e).split('\n')[0];
-      return { pages: 0, error, logs: [...logs, `실패: ${error}`] };
-    } finally {
-      ctl = null;
-    }
+  run(input, root) {
+    return session(input.tabId, (opener, signal) =>
+      scrape(extEnv(opener, root), input.url, input.sel, input.nextSel, input.prefix, { ...input.opts, signal, onLog }));
+  },
+  probe(input) {
+    return session(input.tabId, async opener => {
+      await probe(opener, input.url, input.sel, input.nextSel, { ...input.opts, onLog });
+      return 0;
+    });
+  },
+  pick(input) {
+    picks.length = 0;
+    const { mode, ...opts } = input.opts;
+    return session(input.tabId, async (opener, signal) => {
+      // 선택값은 대상 페이지가 정한 값이다 → 검사를 거친 것만 입력란 값으로 넘긴다.
+      await pick(opener, input.url, payload => {
+        const u = pickUpdate(payload);
+        if (!u) return;
+        picks.push({ key: u.key, sel: u.sel });
+        onLog(u.line);
+      }, { ...opts, signal, onLog, targets: mode === 'image' ? ['이미지', 'next', '제목'] : ['본문', 'next', '제목', '제외'] });
+      return 0;
+    });
   },
   stop() {
     ctl?.abort();
   },
   logs,
+  picks,
 } satisfies PanelApi;

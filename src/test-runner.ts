@@ -9,9 +9,14 @@ const files = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: tr
   e.isDirectory() ? files(path.join(dir, e.name)) : e.name.endsWith('.test.js') ? [path.join(dir, e.name)] : []);
 
 app.on('window-all-closed', () => {});    // 테스트 창을 닫을 때마다 앱이 종료되지 않게 한다
+// 소스 경로(src/…/x.test.ts)를 주면 그 파일만 돌린다 → 개발 중 확인을 빠르게 한다. 검증 명령은 인자 없이 전체를 돈다.
+const only = process.argv.slice(2).filter(a => a.endsWith('.test.ts'))
+  .map(a => path.join(__dirname, path.relative('src', a).replace(/\.ts$/, '.js')));
+
 app.whenReady().then(() => {
-  const all = files(__dirname);
-  const stream = run({ files: all, isolation: 'none', concurrency: 1 });
+  const all = only.length ? only : files(__dirname);
+  // 결함이 있으면 브라우저 쪽 기다림이 끝나지 않는 테스트가 있다 → 매달리지 않고 실패로 끝낸다.
+  const stream = run({ files: all, isolation: 'none', concurrency: 1, timeout: 60000 });
   // 같은 프로세스 실행은 프로세스가 끝날 때 요약을 낸다 → Electron 에서는 오지 않는다.
   // 파일은 차례로 로드되므로, 모든 파일이 테스트를 등록했고 등록한 것이 모두 끝났을 때를 끝으로 본다.
   const started = new Set<string>();
