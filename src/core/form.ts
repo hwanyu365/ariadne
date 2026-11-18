@@ -1,4 +1,4 @@
-import { checkCharset } from './charset';
+import { checkCharset } from './charset.js';
 
 export const TEXT_KEYS = ['url', 'sel', 'next', 'title', 'exclude', 'charset', 'prefix'] as const;
 export const NUM_FIELDS = [
