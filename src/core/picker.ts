@@ -91,6 +91,10 @@ export const PICKER_JS = `function install(opts) {
   // 가드는 설치가 끝난 뒤에 세운다. 앞에 두면 실패한 설치가 재설치를 막는다.
   if (window.__ariadnePicker) return;
 
+  // 선택을 마친 뒤에도 사용자가 그 탭을 계속 쓴다 → 걷을 수 있게 리스너를 한 신호에 묶는다.
+  const off = new AbortController();
+  const listen = {capture: true, signal: off.signal};
+
   const mk = (tag, css) => {
     const e = document.createElement(tag);
     e.setAttribute(UI, '');
@@ -155,7 +159,7 @@ export const PICKER_JS = `function install(opts) {
     const r = e.target.getBoundingClientRect();
     Object.assign(box.style, {display: 'block', left: r.left + 'px', top: r.top + 'px',
       width: r.width + 'px', height: r.height + 'px'});
-  }, true);
+  }, listen);
 
   document.addEventListener('click', e => {
     // 핸들러는 격리 world 에 있어도 DOM 이벤트는 페이지가 합성할 수 있다 → 사람이 누른 것만 선택으로 센다.
@@ -167,9 +171,15 @@ export const PICKER_JS = `function install(opts) {
     const text = (el.innerText || el.getAttribute('src') || '').trim();
     drawList(cands, text);
     send({target: current, sel: cands.length ? cands[0].sel : '', candidates: cands, text: text});
-  }, true);
+  }, listen);
 
   drawHead();
+  window.__ariadnePickerOff = () => {
+    off.abort();
+    box.remove();
+    bar.remove();
+    window.__ariadnePicker = false;
+  };
   window.__ariadnePicker = true;
 }`;
 

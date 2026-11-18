@@ -456,7 +456,7 @@ export interface ProbeOptions {
   exclude?: string | null;
 }
 
-export async function probe(env: Env, url: string, sel: string | null, nextSel: string | null, o: ProbeOptions = {}): Promise<void> {
+export async function probe(env: Pick<Env, 'open'>, url: string, sel: string | null, nextSel: string | null, o: ProbeOptions = {}): Promise<void> {
   const { timeout = 15000, delay = 0, charset = null } = o;
   const log = o.onLog ?? console.log;
   const page = await env.open({ show: !!o.headful, charset });
@@ -503,6 +503,10 @@ export async function probe(env: Env, url: string, sel: string | null, nextSel: 
       log('\n창을 확인한 뒤 [중지] 를 누르면 닫힙니다.');
       await Promise.race([o.pause(), page.whenClosed()]);
     }
+  } catch (e) {
+    // 탭을 잃으면 진행 중이던 평가도 실패한다 → 그 실패가 아니라 탭을 잃은 사유로 끝낸다.
+    if (!page.interrupted?.aborted) throw e;
+    log(`  중단: ${String(page.interrupted.reason)}`);
   } finally {
     page.close();
   }
@@ -517,7 +521,7 @@ export interface PickOptions {
 }
 
 /** 창을 띄우고 사용자가 클릭한 요소의 셀렉터 후보를 onPick 으로 넘긴다. 완료·중지·창 닫기 중 먼저 오는 것에서 끝난다. */
-export async function pick(env: Env, url: string, onPick: (payload: unknown) => void, o: PickOptions = {}): Promise<void> {
+export async function pick(env: Pick<Env, 'open'>, url: string, onPick: (payload: unknown) => void, o: PickOptions = {}): Promise<void> {
   const log = o.onLog ?? console.error;
   let done = false;
   const page = await env.open({
