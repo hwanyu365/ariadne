@@ -259,6 +259,86 @@ test('TC#80 extPanelUrlFollowsCurrentTab', async () => {
   }
 });
 
+/** 폴더 권한 질의를 바꿔 끼운다. query 는 지금 권한, request 는 요청에 대한 사용자 답이다. hold 면 요청 답을 release() 까지 미룬다. */
+const stubPermission = (ui: PwPage, query: PermissionState, request: PermissionState, hold = false) => ui.evaluate(([q, r, h]) => {
+  const w = window as unknown as { asked: number; release?: () => void };
+  w.asked = 0;
+  const proto = FileSystemDirectoryHandle.prototype as unknown as Record<string, unknown>;
+  proto.queryPermission = async () => q;
+  proto.requestPermission = () => {
+    w.asked++;
+    return h ? new Promise(res => { w.release = () => res(r); }) : Promise.resolve(r);
+  };
+}, [query, request, hold] as const);
+
+test('TC#81 extPanelAsksFolderPermissionAgain', async () => {
+  const s = await setup(TWO, { folder: 'ui-81p' });
+  try {
+    await fill(s.ui, { sel: '#c', next: '#next' });
+    await stubPermission(s.ui, 'prompt', 'denied');
+    await click(s.ui, '#run');
+    await until(s.ui, '#result-text', /^입력 확인 · 폴더에 쓸 권한이 없습니다\. \[폴더 선택\] 으로 다시 골라 주세요\.$/);
+    assert.equal(await s.ui.evaluate(() => document.activeElement!.id), 'pick-dir');
+    assert.equal(await s.ui.evaluate(() => (window as unknown as { asked: number }).asked), 1);
+    await stubPermission(s.ui, 'prompt', 'granted');
+    await click(s.ui, '#run');
+    await until(s.ui, '#st-state', /완료/);
+    assert.deepEqual(Object.keys(await s.x.opfsFiles('ui-81p')).sort(), ['page_0001.txt', 'page_0002.txt']);
+    // 이미 허용된 폴더는 다시 묻지 않는다.
+    await stubPermission(s.ui, 'granted', 'denied');
+    await click(s.ui, '#run');
+    await until(s.ui, '#st-state', /완료/);
+    assert.equal(await s.ui.evaluate(() => (window as unknown as { asked: number }).asked), 0);
+  } finally {
+    await s.close();
+  }
+});
+
+test('TC#78 extPanelStopWhilePreparingDoesNotRun', async () => {
+  const s = await setup(TWO, { folder: 'ui-78s' });
+  try {
+    await fill(s.ui, { sel: '#c', next: '#next' });
+    await stubPermission(s.ui, 'prompt', 'granted', true);
+    await click(s.ui, '#run');
+    await s.ui.waitForFunction(() => (window as unknown as { asked: number }).asked === 1, undefined, { polling: 50 });
+    await s.ui.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await s.ui.evaluate(() => (window as unknown as { release: () => void }).release());
+    await until(s.ui, '#st-state', /중지됨|완료/);
+    assert.match(await text(s.ui, '#st-state'), /중지됨/);
+    assert.match(await text(s.ui, '#result-text'), /^중지됨 · 0페이지/);
+    assert.deepEqual(Object.keys(await s.x.opfsFiles('ui-78s')), []);
+    assert.equal(await s.x.attached(s.tab.id), false);
+  } finally {
+    await s.close();
+  }
+});
+
+test('TC#83 extPanelKeepsRecentWhenSavesOverlap', async () => {
+  const x = await ext();
+  const s = await setup(TWO, { folder: 'ui-83o' });
+  try {
+    // 입력 저장이 읽기를 늦게 마치는 사이 수집 시작이 최근 URL 을 남긴다.
+    await s.ui.evaluate(() => {
+      const area = chrome.storage.local as unknown as { get: (...a: unknown[]) => Promise<unknown> };
+      const get = area.get.bind(area);
+      let slow = true;
+      area.get = async (...a: unknown[]) => {
+        const got = await get(...a);
+        if (slow) { slow = false; await new Promise(r => setTimeout(r, 1500)); }
+        return got;
+      };
+    });
+    await fill(s.ui, { sel: '#c', next: '#next' });
+    await sleep(400);
+    await click(s.ui, '#run');
+    await until(s.ui, '#st-state', /완료/);
+    await sleep(2000);
+    assert.deepEqual((await stored(x)).recent, [`${s.base}/a.html`]);
+  } finally {
+    await s.close();
+  }
+});
+
 test('TC#81 extPanelRemembersFolderAndRequiresOne', async () => {
   const s = await setup(TWO, { folder: null });
   try {

@@ -39,12 +39,17 @@ async function stored(): Promise<Settings> {
   }
 }
 
-async function keep(update: (s: Settings) => Settings) {
-  try {
-    await chrome.storage.local.set({ [STORE]: update(await stored()) });
-  } catch {
-    // 설정을 못 남겨도 수집은 계속돼야 한다
-  }
+// 읽고 고쳐 쓰는 저장이 겹치면 늦게 쓴 쪽이 앞의 변경을 지운다 → 한 줄로 세운다.
+let saving = Promise.resolve();
+function keep(update: (s: Settings) => Settings): Promise<void> {
+  saving = saving.then(async () => {
+    try {
+      await chrome.storage.local.set({ [STORE]: update(await stored()) });
+    } catch {
+      // 설정을 못 남겨도 수집은 계속돼야 한다
+    }
+  });
+  return saving;
 }
 
 // 화면은 입력값만 바꾼다 → 최근 URL·사이트 설정은 수집을 시작할 때만 바뀐다.
@@ -201,6 +206,11 @@ async function start(k: Kind) {
     setState('입력 확인', 'check');
     showResult(`입력 확인 · ${msg}`, 'check');
     markInvalid(e instanceof InputError ? e.field : null);
+    return;
+  }
+  // 준비하는 동안에는 멈출 실행이 아직 없다 → 그 사이 누른 중지는 여기서 반영한다.
+  if (stopped) {
+    finish({ pages: 0, error: null, logs: [] }, ready.root, ready.args.text.prefix);
     return;
   }
   const { args: { text, nums }, tabId } = ready;
