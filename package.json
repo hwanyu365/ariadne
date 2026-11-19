@@ -1,6 +1,6 @@
 {
   "name": "ariadne",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 Chrome 확장",
   "private": true,
   "scripts": {
