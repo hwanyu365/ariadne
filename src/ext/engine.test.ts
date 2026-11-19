@@ -506,6 +506,66 @@ test('TC#71 extPanelCloseDetachesDebugger', async () => {
   }
 });
 
+test('TC#66 extRunFinishesWhenWorkerPortFails', async () => {
+  // 서비스 워커가 내려가 포트가 끊긴 사이에 붙이기·떼기를 알리면 postMessage 가 던진다 → 그래도 수집은 끝나고 디버거는 떨어진다.
+  const x = await ext();
+  const d = tempDir();
+  writeLink(d);
+  const srv = await serve(d);
+  const tab = await x.newTab();
+  // 패널 모듈이 뜨면서 연 포트의 postMessage 가 던지게 한다 → 모듈보다 먼저 connect 를 감싼다.
+  const other = await x.ctx.newPage();
+  await other.addInitScript(() => {
+    const connect = chrome.runtime.connect.bind(chrome.runtime) as (i: chrome.runtime.ConnectInfo) => chrome.runtime.Port;
+    (chrome.runtime as { connect: unknown }).connect = (info: chrome.runtime.ConnectInfo) => {
+      const port = connect(info);
+      port.postMessage = () => { throw new Error('Attempting to use a disconnected port object'); };
+      return port;
+    };
+  });
+  await other.goto(`chrome-extension://${x.id}/panel.html`);
+  await other.waitForFunction(() => 'ariadne' in globalThis);
+  try {
+    const fails = await other.evaluate(() => {
+      const p = chrome.runtime.connect({ name: 'probe' });
+      try { p.postMessage(1); return false; } catch { return true; } finally { p.disconnect(); }
+    });
+    assert.equal(fails, true, '포트의 postMessage 를 던지게 바꾸지 못했다');
+    const r = await x.scrape(tab, `${srv.base}/p1.html`, '#c', '.next', tempDir(), 'out/p', { timeout: 5000 }, other);
+    assert.equal(r.error, null, joined(r));
+    assert.equal(r.pages, 3, joined(r));
+    assert.equal(await x.attached(tab.id), false);
+  } finally {
+    await other.close();
+    await x.closeTab(tab);
+    await srv.close();
+  }
+});
+
+test('TC#66 extDetachCompletesWhenNotifyingFails', async () => {
+  // 떼었다는 알림이 던져도 페이지는 닫힌 것으로 끝난다 → 패널 API 가 돌아오지 않는 일이 없다.
+  const x = await ext();
+  const d = tempDir();
+  writeLink(d, 1);
+  const srv = await serve(d);
+  const tab = await x.newTab(`${srv.base}/p1.html`);
+  try {
+    // tsc 가 import() 를 require 로 바꾼다 → 패널 문서에서 모듈을 부를 때는 식을 글자로 넘긴다.
+    const got = await x.panel.evaluate(`(async () => {
+      const env = await import('./dist/ext/env.js');
+      const opener = env.tabOpener(${tab.id}, () => {}, on => { if (!on) throw new Error('끊긴 포트'); });
+      const page = await opener.open({});
+      page.close();
+      return await Promise.race([opener.settled().then(() => 'settled'), new Promise(r => setTimeout(() => r('hang'), 3000))]);
+    })()`);
+    assert.equal(got, 'settled');
+    assert.equal(await x.attached(tab.id), false);
+  } finally {
+    await x.closeTab(tab);
+    await srv.close();
+  }
+});
+
 test('TC#72 extHiddenTabLoadsLazyImages', async () => {
   const x = await ext();
   const d = tempDir();

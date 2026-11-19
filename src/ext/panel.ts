@@ -10,9 +10,17 @@ installTimers();
 // 서비스 워커가 내려가도 연결이 끊긴다 → 다시 이어 붙인 탭을 다시 알린다.
 const held = new Set<number>();
 let port: chrome.runtime.Port;
+// 워커가 내려간 뒤 끊김 알림이 오기 전까지는 포트가 던진다 → 붙인 탭 목록은 held 에 남고 다시 이을 때 보낸다.
+function tell(m: { tabId: number; attached: boolean }) {
+  try {
+    port.postMessage(m);
+  } catch {
+    // 다시 이을 때 held 로 알린다
+  }
+}
 function connect() {
   port = chrome.runtime.connect({ name: 'panel' });
-  for (const tabId of held) port.postMessage({ tabId, attached: true });
+  for (const tabId of held) tell({ tabId, attached: true });
   port.onDisconnect.addListener(connect);
 }
 connect();
@@ -37,7 +45,7 @@ async function session(tabId: number, body: (opener: ReturnType<typeof tabOpener
   const attached = (on: boolean) => {
     if (on) held.add(tabId);
     else held.delete(tabId);
-    port.postMessage({ tabId, attached: on });
+    tell({ tabId, attached: on });
   };
   const opener = tabOpener(tabId, onLog, attached);
   try {

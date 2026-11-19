@@ -162,8 +162,12 @@ export class DebuggerPage extends CdpPage {
     this.detached = true;
     this.cleanup.forEach(f => f());
     void released.then(() => {
-      this.onAttach(false);
-      this.markGone();
+      // 알림이 던져도 닫힌 것으로 끝낸다 → 기다리는 쪽이 매달리지 않는다.
+      try {
+        this.onAttach(false);
+      } finally {
+        this.markGone();
+      }
     });
   }
 
