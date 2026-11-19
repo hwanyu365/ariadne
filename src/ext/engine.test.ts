@@ -70,7 +70,7 @@ const served = (write: (d: string) => void, handler?: Handler) => async (d: stri
   return serve(d, handler);
 };
 
-// 앱과 같은 순회·저장 규칙을 확장의 Page·Sink 로 다시 본다.
+// 순회·저장 규칙이 확장의 Page·Sink 를 지나는 자리를 본다.
 
 test('TC#1 extLinkPagination', async () => {
   const { r, root, out } = await collect(served(writeLink), '/p1.html', '#c');
@@ -313,6 +313,8 @@ test('TC#30 extClickableNextToLocalFileIsNotFollowed', async () => {
   const { r, root, out } = await collect(served(d => write(path.join(d, 'a.html'), pageHtml('본문 1', `<a class="next" href="${pathToFileURL(secret).href}">n</a>`))),
     '/a.html', '#c', { timeout: 1500 });
   assert.deepEqual(out.map(f => read(root, `out/${f}`)), ['본문 1'], joined(r));
+  // 브라우저가 이동을 막아 수집 대상이 바뀌지 않는다 → 그 사유로 멈춘다.
+  assert.ok(r.logs.some(l => l.includes('중단') && l.includes('바뀌지 않았습니다')), joined(r));
 });
 
 // 확장에서만 생기는 동작

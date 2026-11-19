@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  # 태그 전에 세 OS 빌드와 확장 zip 만 확인한다. Release 는 만들지 않고 산출물을 artifact 로 남긴다.
+  # 태그 전에 확장 zip 만 확인한다. Release 는 만들지 않고 산출물을 artifact 로 남긴다.
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # 숨긴 창이 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊는다.
+    # 테스트 브라우저가 멈추면 테스트가 끝나지 않는다 → 기본 6시간 대신 짧게 끊는다.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -23,37 +23,12 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      # 확장 테스트는 Playwright 의 Chromium 에 확장을 올린다 → ci.yml 과 같이 설치한다.
+      - run: npx playwright-core install --with-deps chromium
       # Ubuntu 24.04 는 비특권 user namespace 를 막아 Chromium 샌드박스가 뜨지 않는다.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: xvfb-run -a npm run verify
 
-  build:
-    needs: test
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-          cache: npm
-      - run: npm ci
-      - run: npm run dist
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ariadne-${{ matrix.os }}
-          path: |
-            release/*.exe
-            release/*.zip
-            release/*.AppImage
-          if-no-files-found: error
-
-  # 확장 zip 은 OS 와 무관하다 → 한 러너에서 한 번 만든다.
   ext:
     needs: test
     runs-on: ubuntu-latest
@@ -74,9 +49,9 @@ jobs:
           path: release/*-chrome.zip
           if-no-files-found: error
 
-  # 세 OS 산출물과 확장 zip 이 모두 있을 때만 Release 를 만든다 → 일부만 빠진 Release 가 남지 않는다.
+  # 검증을 통과한 커밋의 zip 만 Release 에 올린다.
   release:
-    needs: [build, ext]
+    needs: ext
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

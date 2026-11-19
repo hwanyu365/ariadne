@@ -25,7 +25,7 @@ export function ext(): Promise<Ext> {
 }
 
 export class Ext {
-  private constructor(readonly ctx: BrowserContext, readonly id: string, readonly panel: PwPage, private readonly proc: ReturnType<typeof spawn>) {}
+  private constructor(readonly ctx: BrowserContext, readonly id: string, readonly panel: PwPage, private readonly proc: ReturnType<typeof spawn>, private readonly profile: string) {}
 
   /** dir 의 확장을 올린 Chromium 을 띄운다. 공유 인스턴스는 ext() 로 얻고, 따로 띄운 것은 close() 로 끈다. */
   static async launch(dir = EXT_DIR): Promise<Ext> {
@@ -54,11 +54,15 @@ export class Ext {
     const panel = await ctx.newPage();
     await panel.goto(`chrome-extension://${id}/panel.html`);
     await panel.waitForFunction(() => 'ariadne' in globalThis);
-    return new Ext(ctx, id, panel, proc);
+    return new Ext(ctx, id, panel, proc, profile);
   }
 
-  close(): void {
+  /** 띄운 Chromium 을 끄고 임시 프로필을 지운다. 프로세스가 끝나야 파일을 놓는다. */
+  async close(): Promise<void> {
+    const exited = new Promise(r => this.proc.once('exit', r));
     this.proc.kill();
+    await exited;
+    await fs.promises.rm(this.profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 
   /** 패널 주소의 페이지를 하나 더 연다. */
@@ -118,9 +122,8 @@ export class Ext {
     return { id, page };
   }
 
-  /** 대상 탭에서 수집하고, 결과 폴더를 root 디스크 폴더로 내려받는다. root 의 기존 파일은 먼저 올린다. */
-  /** started 는 수집을 보낸 직후에 부른다. 그 뒤의 패널 호출은 이번 수집의 로그만 본다. */
-  async scrape(tab: Tab, url: string, sel: string, nextSel: string, root: string, prefix: string, opts: RunOptions = {}, panel = this.panel, started?: () => void): Promise<RunResult> {
+  /** 디스크 폴더 root 의 파일을 패널 OPFS 의 새 폴더로 올리고 그 이름을 돌려준다. */
+  async upload(root: string, panel = this.panel): Promise<string> {
     const dir = `run-${++runs}`;
     await panel.evaluate(async ([dir, files]) => {
       const base = await (await navigator.storage.getDirectory()).getDirectoryHandle(dir, { create: true });
@@ -133,14 +136,11 @@ export class Ext {
         await w.close();
       }
     }, [dir, readTree(root)] as const);
-    const running = panel.evaluate(async ([dir, input]) => {
-      // 지난 수집의 로그로 이번 수집의 진행을 판정하지 않게 먼저 비운다.
-      ariadne.logs.length = 0;
-      const base = await (await navigator.storage.getDirectory()).getDirectoryHandle(dir);
-      return ariadne.run(input, base);
-    }, [dir, { tabId: tab.id, url, sel, nextSel, prefix, opts }] as const);
-    started?.();
-    const got = await running;
+    return dir;
+  }
+
+  /** upload 로 만든 OPFS 폴더를 디스크 폴더 root 로 내려받고 지운다. */
+  async download(dir: string, root: string, panel = this.panel): Promise<void> {
     const files = await panel.evaluate(async dir => {
       const root = await navigator.storage.getDirectory();
       const out: Record<string, string> = {};
@@ -163,6 +163,21 @@ export class Ext {
       fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
       fs.writeFileSync(path.join(root, rel), Buffer.from(b64, 'base64'));
     }
+  }
+
+  /** 대상 탭에서 수집하고, 결과 폴더를 root 디스크 폴더로 내려받는다. root 의 기존 파일은 먼저 올린다. */
+  /** started 는 수집을 보낸 직후에 부른다. 그 뒤의 패널 호출은 이번 수집의 로그만 본다. */
+  async scrape(tab: Tab, url: string, sel: string, nextSel: string, root: string, prefix: string, opts: RunOptions = {}, panel = this.panel, started?: () => void): Promise<RunResult> {
+    const dir = await this.upload(root, panel);
+    const running = panel.evaluate(async ([dir, input]) => {
+      // 지난 수집의 로그로 이번 수집의 진행을 판정하지 않게 먼저 비운다.
+      ariadne.logs.length = 0;
+      const base = await (await navigator.storage.getDirectory()).getDirectoryHandle(dir);
+      return ariadne.run(input, base);
+    }, [dir, { tabId: tab.id, url, sel, nextSel, prefix, opts }] as const);
+    started?.();
+    const got = await running;
+    await this.download(dir, root, panel);
     return got;
   }
 

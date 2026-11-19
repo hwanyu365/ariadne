@@ -70,7 +70,7 @@ export function pickUpdate(payload: unknown): { key: TextKey; sel: string; line:
 
 const SITE_KEYS = ['sel', 'next', 'title', 'exclude', 'charset'] as const;
 export type Site = Record<(typeof SITE_KEYS)[number], string> & { mode: Mode };
-export type Settings = Partial<Raw> & { mode?: Mode; headful?: boolean; merge?: boolean; recent?: string[]; sites?: Record<string, Site> };
+export type Settings = Partial<Raw> & { mode?: Mode; merge?: boolean; recent?: string[]; sites?: Record<string, Site> };
 
 const MAX_RECENT = 10;
 const MAX_SITES = 50;
@@ -102,18 +102,17 @@ export function siteFor(s: Settings, url: string): Site | null {
   return host && s.sites && Object.hasOwn(s.sites, host) ? s.sites[host] : null;
 }
 
-/** 아는 키·맞는 타입만 남긴다. 파일에서 읽은 값과 화면이 보낸 값 모두 이 형태로만 다룬다. */
+/** 아는 키·맞는 타입만 남긴다. 저장소에서 읽은 값과 화면이 보낸 값 모두 이 형태로만 다룬다. */
 export function cleanSettings(data: unknown): Settings {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
   const d = data as Record<string, unknown>;
   const got: Settings = {};
   for (const k of Object.keys(DEFAULTS) as (keyof Raw)[]) if (typeof d[k] === 'string') got[k] = d[k] as string;
   if (d.mode === 'text' || d.mode === 'image') got.mode = d.mode;
-  if (typeof d.headful === 'boolean') got.headful = d.headful;
   if (typeof d.merge === 'boolean') got.merge = d.merge;
   if (Array.isArray(d.recent)) got.recent = d.recent.filter((u): u is string => typeof u === 'string').slice(0, MAX_RECENT);
   if (d.sites && typeof d.sites === 'object' && !Array.isArray(d.sites)) {
-    // fromEntries 는 '__proto__' 같은 이름도 자기 키로 만든다 → 파일 내용이 객체의 원형을 바꾸지 못한다.
+    // fromEntries 는 '__proto__' 같은 이름도 자기 키로 만든다 → 저장된 값이 객체의 원형을 바꾸지 못한다.
     got.sites = Object.fromEntries(Object.entries(d.sites).flatMap(([h, v]) => {
       const site = cleanSite(v);
       return site ? [[h, site]] : [];

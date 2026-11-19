@@ -4,10 +4,10 @@ import type http from 'node:http';
 import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { BrowserWindow } from 'electron';
 import { type Handler, serve, staticFile, tempDir } from '../test/serve';
-import { fsSink, probe, reachable, scrape, type ScrapeOptions } from './engine';
-import { Page } from './page';
+import { ext } from '../test/ext';
+import { probe, scrape, type ScrapeOptions } from '../test/engine';
+import { reachable } from './engine';
 
 const PNG = Buffer.concat([Buffer.from('\x89PNG\r\n\x1a\n', 'latin1'), Buffer.from('fixture'.repeat(4))]);
 const write = (file: string, body: string | Buffer) => fs.writeFileSync(file, body);
@@ -132,27 +132,6 @@ test('TC#4 disabledNextFollowsHref', async () => {
   assert.deepEqual(texts, ['본문 1', '본문 2', '본문 3']);
 });
 
-test('TC#14 fsSinkWritesAtPrefixPath', async () => {
-  const d = tempDir();
-  const plain = fsSink(path.join(d, 'sub', 'p'));
-  assert.equal(plain.base, 'p');
-  await plain.write('p_0001.txt', 'a');
-  assert.equal(fs.readFileSync(path.join(d, 'sub', 'p_0001.txt'), 'utf8'), 'a');
-  assert.deepEqual(await plain.list(), ['p_0001.txt']);
-
-  // 구분자로 끝나는 접두사는 이름 앞부분이 비고, 폴더는 접두사의 dirname 에서 만들고 읽는다.
-  const slash = fsSink(path.join(d, 'out') + path.sep);
-  assert.equal(slash.base, '');
-  assert.equal(fs.existsSync(path.join(d, 'out')), false);
-  assert.ok((await slash.list()).includes('sub'));
-  fs.mkdirSync(path.join(d, 'out'));
-  await slash.write('_0001.txt', 'b');
-  await slash.append('_0001.txt', 'c');
-  assert.equal(fs.readFileSync(path.join(d, 'out', '_0001.txt'), 'utf8'), 'bc');
-  assert.equal(await slash.exists('_0001.txt'), true);
-  assert.equal(await slash.size('_0001.txt'), 2);
-});
-
 test('TC#14 digitsAndStart', async () => {
   const { names } = await run(fixtureLink, { digits: 3, start: 65 });
   assert.deepEqual(names, ['p_065.txt', 'p_066.txt', 'p_067.txt']);
@@ -233,7 +212,7 @@ test('TC#20 charsetUndeclaredUtf8Warns', async () => {
   const { n, texts, logs } = await runUndeclared();
   assert.equal(n, 2);
   assert.notEqual(texts[0], '본문 1 가나다');          // 픽스처가 실제로 추정을 틀리게 만드는지
-  assert.ok(logs.some(l => l.includes('windows-1252')), logs.join('\n'));
+  assert.ok(logs.some(l => /브라우저가 (?!utf-8 )\S+ 로 읽었습니다/i.test(l)), logs.join('\n'));
 });
 
 test('TC#20 charsetWarnsWhenLaterPageUndeclared', async () => {
@@ -249,7 +228,7 @@ test('TC#20 charsetWarnsWhenLaterPageUndeclared', async () => {
   } finally {
     await srv.close();
   }
-  assert.equal(logs.filter(l => l.includes('windows-1252')).length, 1, logs.join('\n'));
+  assert.equal(logs.filter(l => /브라우저가 (?!utf-8 )\S+ 로 읽었습니다/i.test(l)).length, 1, logs.join('\n'));
 });
 
 test('TC#21 charsetForcedReadsUndeclaredUtf8', async () => {
@@ -257,7 +236,7 @@ test('TC#21 charsetForcedReadsUndeclaredUtf8', async () => {
   const { n, texts, logs } = await runUndeclared({ charset: 'utf-8' });
   assert.equal(n, 2);
   assert.deepEqual(texts, ['본문 1 가나다', '본문 2 가나다']);
-  assert.ok(!logs.some(l => l.includes('windows-1252')), logs.join('\n'));
+  assert.ok(!logs.some(l => /브라우저가 (?!utf-8 )\S+ 로 읽었습니다/i.test(l)), logs.join('\n'));
 });
 
 test('TC#21 charsetAliasAppliedNotWarned', async () => {
@@ -314,17 +293,20 @@ test('TC#22 charsetForcedLeavesIframeAlone', async () => {
   write(path.join(d, 'inner.html'), Buffer.concat([Buffer.from('<meta charset="euc-kr"><body><div id=i>'),
     Buffer.from([0xb1, 0xa4, 0xb0, 0xed, 0x20, 0xb0, 0xa1, 0xb3, 0xaa, 0xb4, 0xd9]), Buffer.from('</div></body>')]));   // "광고 가나다"
   const srv = await serve(d);
-  const page = await Page.open({ charset: 'utf-8' });
+  const x = await ext();
+  const tab = await x.newTab();
   try {
-    await page.goto(`${srv.base}/outer.html`, 5000);
-    await page.waitFor('#c', 5000);
-    const outer = await page.eval<string>(`document.querySelector('#c').innerText`);
-    const frame = await page.waitForChildFrame(5000);
-    const inner = await frame.executeJavaScript(`new Promise(r => { const f = () => document.querySelector('#i') ? r(document.querySelector('#i').innerText) : setTimeout(f, 50); f(); })`);
+    // 선택기는 끝낼 때까지 지정 인코딩으로 탭을 붙들고 있다 → 그동안 두 문서를 읽는다.
+    const { done } = await x.pick(tab, `${srv.base}/outer.html`, { charset: 'utf-8' });
+    const outer = await tab.page.locator('#c').innerText();
+    const frame = tab.page.frames().find(f => f.url().endsWith('/inner.html'))!;
+    const inner = await frame.locator('#i').innerText();
+    await x.panel.evaluate(() => ariadne.stop());
+    await done;
     assert.equal(outer, '본문 가나다');
     assert.equal(inner, '광고 가나다');
   } finally {
-    page.close();
+    await x.closeTab(tab);
     await srv.close();
   }
 });
@@ -333,7 +315,7 @@ test('TC#21 charsetFailureFallsBackToOriginal', async () => {
   // 가로챈 응답을 바꾸다 실패해도 요청을 풀어 원래 응답으로 로드한다. 매달리면 수집이 타임아웃으로 끝난다.
   const { n, texts } = await runUndeclared({
     charset: 'utf-8',
-    cdp: send => (method, params) => method === 'Fetch.getResponseBody' ? Promise.reject(new Error('고장')) : send(method, params),
+    cdp: `send => (method, params) => method === 'Fetch.getResponseBody' ? Promise.reject(new Error('고장')) : send(method, params)`,
   });
   assert.equal(n, 2);
   assert.notEqual(texts[0], '본문 1 가나다');           // 지정이 빠진 원래 응답이다
@@ -359,6 +341,8 @@ test('TC#21 charsetForcedKeepsCookies', async () => {
     await scrape(`${srv.base}/p1.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 5000, charset: 'utf-8', ...quiet });
   } finally {
     await srv.close();
+    // 테스트 브라우저 하나를 모든 테스트가 같이 쓴다 → 쿠키는 포트와 무관하게 호스트에 남아 다른 테스트의 요청에 실린다.
+    await (await ext()).ctx.clearCookies();
   }
   assert.equal(read(d, 'p_0002.txt'), 'a=1; b=2');
 });
@@ -382,8 +366,8 @@ test('TC#33 probeReportsCharset', async () => {
   } finally {
     await srv.close();
   }
-  assert.ok(guessed.some(l => l.includes('인코딩: windows-1252')), guessed.join('\n'));
-  assert.ok(guessed.some(l => l.includes('경고') && l.includes('windows-1252')), guessed.join('\n'));
+  assert.ok(guessed.some(l => /^인코딩: (?!utf-8$)\S+$/i.test(l)), guessed.join('\n'));
+  assert.ok(guessed.some(l => l.includes('경고') && /브라우저가 (?!utf-8 )\S+ 로 읽었습니다/i.test(l)), guessed.join('\n'));
   assert.ok(forced.some(l => l.includes('인코딩: UTF-8')), forced.join('\n'));
   assert.ok(forced.some(l => l.includes('본문 1 가나다')), forced.join('\n'));
   assert.ok(!forced.some(l => l.includes('경고')), forced.join('\n'));
@@ -400,23 +384,6 @@ test('TC#32 probeListsCandidatesAndIframes', async () => {
   assert.match(all, /\[next 버튼 후보\][\s\S]*a\.next/);
   assert.match(all, /\[본문 후보[\s\S]*#c/);
   assert.match(all, /주의: iframe 1개/);
-});
-
-test('TC#29 newWindowsAreDenied', async () => {
-  // 수집은 원래 탭만 읽는다 → target=_blank 링크와 window.open 이 창을 만들지 않는다.
-  const d = tempDir();
-  write(path.join(d, 'w.html'), `<meta charset="utf-8"><body><div id=c>본문</div>
-<a id=blank target="_blank" href="w.html">새 탭</a><script>setTimeout(() => window.open('w.html'), 100)</script></body>`);
-  const page = await Page.open();
-  const before = BrowserWindow.getAllWindows().length;
-  try {
-    await page.goto(pathToFileURL(path.join(d, 'w.html')).href, 5000);
-    await page.click('#blank');
-    await new Promise(r => setTimeout(r, 400));
-    assert.equal(BrowserWindow.getAllWindows().length, before);
-  } finally {
-    page.close();
-  }
 });
 
 test('TC#23 charsetNameCheckedAtEngineEntry', async () => {
@@ -504,31 +471,6 @@ test('TC#30 remotePageCannotPointAtLocalFiles', async () => {
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
   assert.ok(logs.some(l => l.includes('건너뜀') && l.includes('secret.png')), logs.join('\n'));
   assert.ok(logs.some(l => l.includes('중단') && l.includes('따라가지 않습니다')), logs.join('\n'));
-});
-
-test('TC#29 permissionsAndDownloadsDenied', async () => {
-  // 수집 창의 원격 페이지는 권한을 얻거나 파일을 내려받지 못한다.
-  const d = tempDir();
-  write(path.join(d, 'x.bin'), 'payload');
-  write(path.join(d, 'p.html'), '<meta charset="utf-8"><body><a id=dl download href="x.bin">받기</a></body>');
-  const srv = await serve(d);
-  const page = await Page.open();
-  const prevented: boolean[] = [];
-  page.win.webContents.session.on('will-download', e => prevented.push(e.defaultPrevented));
-  try {
-    await page.goto(`${srv.base}/p.html`, 5000);
-    const perms = await page.eval<string[]>(`Promise.all([
-      Notification.requestPermission(),
-      navigator.permissions.query({ name: 'geolocation' }).then(s => s.state),
-    ])`);
-    assert.deepEqual(perms, ['denied', 'denied']);
-    await page.click('#dl');
-    await new Promise(r => setTimeout(r, 500));
-    assert.deepEqual(prevented, [true]);
-  } finally {
-    page.close();
-    await srv.close();
-  }
 });
 
 test('TC#6 stopsWithReasonWhenNextStaysCovered', async () => {
@@ -756,7 +698,7 @@ test('TC#11 stopReasonShowsHttpStatus', async () => {
 test('TC#13 logsLastPageAddressAndNumber', async () => {
   // 멈추면 마지막으로 받은 페이지의 주소와 번호를 남겨 그 자리에서 이어 받게 한다.
   const { log } = await runLogged(fixtureLink, { start: 10 });
-  assert.match(log, /마지막으로 받은 페이지: 12번 file:.*p3\.html/);
+  assert.match(log, /마지막으로 받은 페이지: 12번 http:.*p3\.html/);
 });
 
 test('TC#15 warnsWhenFirstFileExists', async () => {
@@ -1020,42 +962,6 @@ test('TC#28 redirectedImageGetsRefererPerHop', async () => {
   assert.deepEqual(seen, [`${site.base}/`, `${site.base}/`]);
 });
 
-test('TC#28 refererHookLeavesOtherRequestsAlone', async () => {
-  // 훅은 수집이 받는 요청의 Referer 만 정한다 → 페이지가 보낸 요청과, 수집 밖의 세션 요청은 그대로 둔다.
-  const imgDir = tempDir();
-  write(path.join(imgDir, 'a.png'), PNG);
-  const files = staticFile();
-  const pageOwn: (string | undefined)[] = [];
-  let outside: string | undefined;
-  const images = await serve(imgDir, (req, res, dir) => {
-    const u = req.url ?? '';
-    if (u.startsWith('/own')) pageOwn.push(req.headers.referer);
-    // 수집 요청을 늦게 끝내 그동안 페이지 요청이 섞이게 한다.
-    if (u === '/a.png') setTimeout(() => files(req, res, dir), 400);
-    else files(req, res, dir);
-  });
-  const d = tempDir();
-  const site = await serve(d, (req, res) => {
-    if ((req.url ?? '').startsWith('/outside')) outside = req.headers.referer;
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`<body><div id=c><img src="${images.base}/a.png"></div>
-<script>let n = 0; setInterval(() => { const i = new Image(); i.referrerPolicy = 'no-referrer'; i.src = '${images.base}/own.png?' + n++; }, 20);</script></body>`);
-  });
-  const page = await Page.open();
-  try {
-    await page.goto(`${site.base}/p.html`, 3000);
-    await page.fetch(`${images.base}/a.png`, 3000, undefined, 'unsafe-url');
-    await page.win.webContents.session.fetch(`${site.base}/outside`, { headers: { Referer: `${site.base}/custom` } });
-  } finally {
-    page.close();
-    await site.close();
-    await images.close();
-  }
-  assert.ok(pageOwn.length > 5, String(pageOwn.length));
-  assert.deepEqual([...new Set(pageOwn)], [undefined]);
-  assert.equal(outside, `${site.base}/custom`);
-});
-
 test('TC#11 errorPageWithSameLayoutIsNotSaved', async () => {
   // 오류 응답이 같은 틀로 본문 자리를 채워도 본문으로 저장하지 않고 상태 코드로 멈춘다.
   const d = tempDir();
@@ -1116,23 +1022,6 @@ test('TC#25 imageModeLoadsLazyImagesInsideScrollBox', async () => {
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png'], logs.join('\n'));
 });
 
-test('TC#27 overlappingFetchIsRejected', async () => {
-  // 이미지별 Referer 정책은 한 번에 하나만 들고 있다 → 겹쳐 부르면 섞이지 않게 거부한다.
-  const d = tempDir();
-  write(path.join(d, 'a.png'), PNG);
-  const files = staticFile();
-  const srv = await serve(d, (req, res, dir) => setTimeout(() => files(req, res, dir), 300));
-  const page = await Page.open();
-  try {
-    const first = page.fetch(`${srv.base}/a.png`, 3000);
-    await assert.rejects(page.fetch(`${srv.base}/a.png`, 3000), /동시에/);
-    assert.equal((await first).status, 200);
-  } finally {
-    page.close();
-    await srv.close();
-  }
-});
-
 test('TC#10 spaStopsWhenCyclingThroughMiddlePages', async () => {
   // 주소가 그대로인 SPA 가 중간 페이지로 돌아가 순환하면(1→2→3→2→3…) 같은 넘어감이 다시 나올 때 멈춘다.
   const order = ['본문 1', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2', '본문 3', '본문 2'];
@@ -1186,19 +1075,6 @@ test('TC#11 imageModeErrorPageIsNotSaved', async () => {
   }
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.png']);
   assert.ok(logs.some(l => l.includes('중단') && l.includes('HTTP 503')), logs.join('\n'));
-});
-
-test('TC#31 runsDoNotShareCookies', async () => {
-  const d = tempDir();
-  const srv = await serve(d, cookieHandler);
-  try {
-    await scrape(`${srv.base}/p1.html`, '#c', '.next', path.join(d, 'a', 'p'), { timeout: 5000, ...quiet });
-    await scrape(`${srv.base}/p2.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 5000, ...quiet });
-  } finally {
-    await srv.close();
-  }
-  assert.equal(fs.readFileSync(path.join(d, 'a', 'p_0002.txt'), 'utf8'), 'a=1; b=2');
-  assert.equal(read(d, 'p_0001.txt'), 'undefined');
 });
 
 test('TC#32 probeListsImageCandidates', async () => {
@@ -1344,13 +1220,12 @@ test('TC#20 charsetNotJudgedWhenBytesMissing', async () => {
   const d = tempDir();
   write(path.join(d, 'a.html'), Buffer.from('<meta charset="utf-8"><div id=c>본문 1 가나다</div><a class="next" href="b.html">n</a>'));
   write(path.join(d, 'b.html'), Buffer.from('<div id=c>본문 2 가나다</div><a class="next" aria-disabled="true">n</a>'));
-  let bodies = 0;
   const logs: string[] = [];
   const srv = await serve(d);
   try {
     const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), {
       timeout: 5000, onLog: m => logs.push(m),
-      cdp: send => (method, params) => method === 'Fetch.getResponseBody' && ++bodies > 1 ? Promise.reject(new Error('고장')) : send(method, params),
+      cdp: `send => { let bodies = 0; return (method, params) => method === 'Fetch.getResponseBody' && ++bodies > 1 ? Promise.reject(new Error('고장')) : send(method, params); }`,
     });
     assert.equal(n, 2);
   } finally {
@@ -1361,8 +1236,8 @@ test('TC#20 charsetNotJudgedWhenBytesMissing', async () => {
 
 test('TC#25 imageModeScrollFailureOnlyWarns', async () => {
   const { pages, names, log } = await runImages('src', 1, {
-    cdp: send => (method, params) => method === 'Runtime.evaluate' && String((params as { expression?: string })?.expression).includes('scrollTo')
-      ? Promise.reject(new Error('스크롤 고장')) : send(method, params),
+    cdp: `send => (method, params) => method === 'Runtime.evaluate' && String(params?.expression).includes('scrollTo')
+      ? Promise.reject(new Error('스크롤 고장')) : send(method, params)`,
   });
   assert.equal(pages, 1);
   assert.equal(names.length, 2);
@@ -1387,33 +1262,3 @@ test('TC#26 imageModeKeepsSvg', async () => {
   assert.deepEqual(outFiles(d, /./), ['p_0001_001.svg']);
 });
 
-test('TC#30 clickableNextToLocalFileIsNotFollowed', async () => {
-  const d = tempDir();
-  const secret = path.join(d, 'secret.html');
-  write(secret, '<meta charset="utf-8"><div id=c>비밀</div>');
-  write(path.join(d, 'a.html'), `<meta charset="utf-8"><body><div id=c>본문 1</div><a class="next" href="${pathToFileURL(secret).href}">n</a></body>`);
-  const logs: string[] = [];
-  const srv = await serve(d);
-  try {
-    const n = await scrape(`${srv.base}/a.html`, '#c', '.next', path.join(d, 'out', 'p'), { timeout: 1500, onLog: m => logs.push(m) });
-    assert.equal(n, 1);
-  } finally {
-    await srv.close();
-  }
-  assert.deepEqual(outFiles(d).map(f => read(d, f)), ['본문 1']);
-  assert.ok(logs.some(l => l.includes('중단') && l.includes('바뀌지 않았습니다')), logs.join('\n'));
-});
-
-test('TC#21 pickerPageAppliesCharset', async () => {
-  const d = tempDir();
-  writeUndeclaredUtf8(d);
-  const srv = await serve(d);
-  const page = await Page.open({ charset: 'utf-8', picker: { targets: ['본문'], onPick: () => {}, onDone: () => {} } });
-  try {
-    await page.goto(`${srv.base}/ep/`, 5000);
-    assert.equal(await page.eval<string>(`document.querySelector('#c').innerText`), '본문 1 가나다');
-  } finally {
-    page.close();
-    await srv.close();
-  }
-});

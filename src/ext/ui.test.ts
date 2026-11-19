@@ -65,6 +65,7 @@ test('TC#78 extPanelMarksInvalidInputAndHasNoAppOnlyControls', async () => {
     await click(s.ui, '#run');
     await ended(s.ui);
     assert.match(await text(s.ui, '#result-text'), /^입력 확인 · 수집 대상과 next 셀렉터가 필요합니다/);
+    assert.match(await text(s.ui, '#log'), /실패: 수집 대상과 next 셀렉터가 필요합니다/);
     assert.equal(await s.ui.evaluate(() => document.querySelector('[name="sel"]')!.getAttribute('aria-invalid')), 'true');
     assert.equal(await s.ui.evaluate(() => (document.activeElement as HTMLInputElement).name), 'sel');
     assert.equal(await s.ui.evaluate(() => (document.querySelector('#run') as HTMLButtonElement).disabled), false);
@@ -73,9 +74,11 @@ test('TC#78 extPanelMarksInvalidInputAndHasNoAppOnlyControls', async () => {
     await until(s.ui, '#result-text', /타임아웃 ms 은 숫자여야 합니다/);
     assert.equal(await s.ui.evaluate(() => (document.querySelector('.advanced') as HTMLDetailsElement).open), true);
     assert.equal(await s.ui.evaluate(() => (document.activeElement as HTMLInputElement).name), 'timeout');
-    await fill(s.ui, { timeout: '15000', charset: 'nope-enc' });
+    // 입력값이 결과·알림 문구에 섞여도 마크업으로 해석하지 않는다.
+    await fill(s.ui, { timeout: '15000', charset: '<b id=evil>nope-enc</b>' });
     await click(s.ui, '#run');
-    await until(s.ui, '#result-text', /^입력 확인 · .*nope-enc/);
+    await until(s.ui, '#result-text', /^입력 확인 · .*<b id=evil>nope-enc/);
+    assert.equal(await s.ui.evaluate(() => document.querySelectorAll('#result b, #announce b, #log b').length), 0);
     assert.equal(await s.ui.evaluate(() => (document.activeElement as HTMLInputElement).name), 'charset');
     const url = await value(s.ui, 'url');
     await fill(s.ui, { charset: '', url: '' });
@@ -94,6 +97,7 @@ test('TC#78 extPanelMarksInvalidInputAndHasNoAppOnlyControls', async () => {
     await until(s.ui, '#st-state', /실패/);
     assert.equal(await s.ui.evaluate(() => (document.querySelector('.advanced') as HTMLDetailsElement).open), false);
     assert.match(await text(s.ui, '#result-text'), /^실패 · 0페이지 · \d\d:\d\d · .+/);
+    assert.equal(await text(s.ui, '#announce'), await text(s.ui, '#result-text'));
     assert.ok(await s.ui.evaluate(() => !!document.querySelector('#log .error')));
     await s.ui.evaluate(() => (document.querySelector('[data-mode="image"]') as HTMLButtonElement).click());
     assert.deepEqual(await s.ui.evaluate(() => ['title', 'exclude', 'merge'].map(n => (document.querySelector(`[name="${n}"]`) as HTMLInputElement).disabled)), [true, true, true]);
@@ -155,12 +159,18 @@ test('TC#78 extPanelKeyboardStartsAndStops', async () => {
     await s.ui.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     await until(s.ui, '#st-state', /중지됨/);
     assert.match(await text(s.ui, '#result-text'), /^중지됨 · 1페이지 · .* 그때까지 받은 파일은 남아 있습니다\. · 저장: ui-78d\/page$/);
+    assert.match(await text(s.ui, '#st-time'), /^\d\d:\d\d$/);
+    // macOS 의 ⌘↵ 도 시작한다.
+    await s.ui.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true })));
+    await until(s.ui, '#st-pages', /1페이지/);
+    await s.ui.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await until(s.ui, '#st-state', /중지됨/);
   } finally {
     await s.close();
   }
 });
 
-test('TC#78 extPanelPickFillsFields', async () => {
+test('TC#40 extPanelPickFillsFields', async () => {
   const s = await setup(TWO, { folder: 'ui-78e' });
   try {
     await click(s.ui, '#pick');
@@ -216,8 +226,17 @@ test('TC#80 extPanelUrlFollowsCurrentTab', async () => {
   });
   try {
     assert.equal(await value(s.ui, 'url'), `${s.base}/a.html`);
+    // 같은 호스트 안에서 옮기면 사이트 설정이 있어도 고쳐 쓰던 셀렉터를 덮지 않는다.
+    const here = new URL(s.base).host;
+    await x.panel.evaluate(async h => {
+      const cur = ((await chrome.storage.local.get('settings')).settings ?? {}) as { sites?: Record<string, unknown> };
+      await chrome.storage.local.set({ settings: { ...cur, sites: { ...cur.sites, [h]: { sel: '#preset', next: '', title: '', exclude: '', charset: '', mode: 'text' } } } });
+    }, here);
+    await fill(s.ui, { sel: '#edited' });
     await goto(s.tab, `${s.base}/b.html`);
     await s.ui.waitForFunction(u => (document.querySelector('[name="url"]') as HTMLInputElement).value === u, `${s.base}/b.html`, { polling: 50 });
+    await sleep(300);
+    assert.equal(await value(s.ui, 'sel'), '#edited');
     await fill(s.ui, { url: `${s.base}/a.html?resume=1` });
     await goto(s.tab, 'about:blank');
     await sleep(500);

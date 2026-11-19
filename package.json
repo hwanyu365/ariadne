@@ -1,77 +1,19 @@
 {
   "name": "ariadne",
   "version": "0.2.0",
-  "description": "페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 데스크톱 도구",
+  "description": "페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 Chrome 확장",
   "private": true,
-  "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc && tsc -p tsconfig.ext.json",
-    "start": "npm run build && electron .",
-    "test": "npm run build && electron dist/test-runner.js",
+    "test": "npm run build && node dist/test-runner.js",
     "verify": "npm test",
-    "dist": "npm run build && electron-builder --publish never",
     "pack": "node -e \"require('fs').rmSync('ext/dist', { recursive: true, force: true })\" && npm run build && node dist/pack.js"
   },
   "devDependencies": {
     "@types/chrome": "0.3.7",
     "@types/node": "24.19.0",
-    "electron": "45.2.3",
-    "electron-builder": "26.18.0",
     "playwright-core": "1.64.1",
     "typescript": "7.0.2"
   },
-  "author": "hwanyu365",
-  "build": {
-    "directories": {
-      "output": "release"
-    },
-    "appId": "io.github.hwanyu365.ariadne",
-    "productName": "ariadne",
-    "artifactName": "ariadne-${version}-${os}-${arch}.${ext}",
-    "files": [
-      "dist/**/*",
-      "!dist/**/*.test.js",
-      "!dist/test/**",
-      "!dist/ext/**",
-      "!dist/test-runner.js",
-      "static/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/ariadne.ico"
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "zip",
-          "arch": [
-            "arm64"
-          ]
-        }
-      ],
-      "icon": "assets/ariadne.png",
-      "identity": null
-    },
-    "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/ariadne.png",
-      "category": "Utility"
-    }
-  }
+  "author": "hwanyu365"
 }

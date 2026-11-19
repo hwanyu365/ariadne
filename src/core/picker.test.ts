@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { pick } from '../test/engine';
+import { ext, type Tab } from '../test/ext';
 import { tempDir } from '../test/serve';
-import { Page } from './page';
-import { CANDIDATES_JS } from '../core/picker';
+import { CANDIDATES_JS } from './picker';
 
 const FIXTURE = `<meta charset="utf-8"><body style="margin:40px 300px 300px 40px">
 <h1 id="tt">제목</h1>
@@ -25,31 +26,67 @@ function fixture(html = FIXTURE, name = 'p.html') {
   return { d, url: pathToFileURL(path.join(d, name)).href };
 }
 
-/** 픽스처를 열고 fn(page, got) 를 돌린다. picker 를 주면 선택기 창으로 연다. */
-async function on<T>(fn: (page: Page, got: unknown[]) => Promise<T>, picker = false, url = fixture().url): Promise<T> {
+/** 대상 탭을 흉내 낸다. 선택기 없이 열면 일반 페이지, picker 면 확장 선택기를 그 탭에 세운다. */
+interface On {
+  url(): string;
+  eval<T>(code: string): Promise<T>;
+  click(selector: string): Promise<void>;
+  goto(name: string): Promise<void>;
+  frameEval<T>(code: string): Promise<T>;
+}
+
+/** 픽스처를 열고 fn(page, got) 를 돌린다. picker 를 주면 확장 선택기를 세운다. */
+async function on<T>(fn: (page: On, got: unknown[]) => Promise<T>, picker = false, url = fixture().url): Promise<T> {
+  const x = await ext();
   const got: unknown[] = [];
-  const page = await Page.open(picker ? { picker: { targets: ['본문', 'next', '제목'], onPick: p => got.push(p), onDone: () => {} } } : {});
+  const wrap = (pg: Tab['page'], tab: Tab | null): On => ({
+    url: () => pg.url(),
+    eval: code => pg.evaluate(code),
+    // 선택기는 사람이 누른 클릭만 받는다 → 신뢰된 마우스 이벤트로 누른다.
+    click: async sel => {
+      if (tab) await x.clickAt(tab, sel);
+      else await pg.click(sel);
+    },
+    goto: async name => { await pg.goto(new URL(name, pg.url()).href); },
+    frameEval: code => pg.frames().find(f => f !== pg.mainFrame())!.evaluate(code),
+  });
+  if (!picker) {
+    const pg = await x.ctx.newPage();
+    try {
+      await pg.goto(url);
+      return await fn(wrap(pg, null), got);
+    } finally {
+      await pg.close();
+    }
+  }
+  const ctl = new AbortController();
+  let opened!: (t: Tab) => void;
+  const tabReady = new Promise<Tab>(r => { opened = r; });
+  const running = pick(url, p => got.push(p), { signal: ctl.signal, onTab: opened, targets: ['본문', 'next', '제목'], timeout: 5000 });
+  const tab = await Promise.race([tabReady, running.then(() => { throw new Error('선택기가 서기 전에 끝났습니다'); })]);
   try {
-    await page.goto(url, 5000);
-    await page.waitFor('body', 5000, 'attached');
-    return await fn(page, got);
+    await tab.page.waitForFunction(() => !!document.querySelector('[data-ariadne-ui] button'), undefined, { timeout: 10000, polling: 50 });
+    const result = await fn(wrap(tab.page, tab), got);
+    // 선택값은 짧은 간격으로 읽어 온다 → 끝내기 전에 한 번 더 기다린다.
+    await sleep(200);
+    return result;
   } finally {
-    page.close();
+    ctl.abort();
+    await running.catch(() => {});
   }
 }
 
-const candidates = (page: Page, selector: string) =>
+const candidates = (page: On, selector: string) =>
   page.eval<Cand[]>(`(${CANDIDATES_JS})(document.querySelector(${JSON.stringify(selector)}))`);
 const bySel = (cs: Cand[]) => Object.fromEntries(cs.map(c => [c.sel, c.n]));
 const uiCount = `document.querySelectorAll('[data-ariadne-ui]').length`;
-/** 선택기는 사람이 누른 클릭만 받는다 → 툴바도 신뢰된 마우스 이벤트로 누른다. */
-async function clickToolbar(page: Page, label: string) {
+async function clickToolbar(page: On, label: string) {
   await page.eval(`[...document.querySelectorAll('[data-ariadne-ui] button')].find(b => b.textContent === ${JSON.stringify(label)}).setAttribute('data-test-target', '')`);
   await page.click('[data-test-target]');
   await page.eval(`document.querySelector('[data-test-target]')?.removeAttribute('data-test-target')`);
 }
 
-async function waitUi(page: Page) {
+async function waitUi(page: On) {
   for (let i = 0; i < 50 && !(await page.eval<number>(uiCount)); i++) await sleep(50);
 }
 
@@ -158,7 +195,7 @@ test('TC#38 pickerReinstallsOnEveryDocument', async () => {
   fs.writeFileSync(path.join(d, 'second.html'), FIXTURE);
   const got = await on(async (page, got) => {
     await waitUi(page);
-    await page.goto(pathToFileURL(path.join(d, 'second.html')).href, 5000);
+    await page.goto('second.html');
     await waitUi(page);
     await page.click('div.article.body');
     await sleep(300);
@@ -173,75 +210,9 @@ test('TC#38 pickerSkipsIframes', async () => {
   fs.writeFileSync(path.join(d, 'outer.html'), FIXTURE.replace('</body>', '<iframe src="inner.html" width="200" height="80"></iframe></body>'));
   const [main, frame] = await on(async page => {
     await waitUi(page);
-    const f = await page.waitForChildFrame(5000);
     await sleep(300);
-    return [await page.eval<number>(uiCount), await f.executeJavaScript(uiCount)] as const;
+    return [await page.eval<number>(uiCount), await page.frameEval<number>(uiCount)] as const;
   }, true, pathToFileURL(path.join(d, 'outer.html')).href);
   assert.ok(main > 0, '메인 프레임에 붙지 않았다');
   assert.equal(frame, 0, 'iframe 에 붙었다');
-});
-
-test('TC#39 pickerChannelHiddenFromPageScripts', async () => {
-  // 선택 결과 통로는 격리 world 에만 있다 → 대상 페이지의 스크립트가 가짜 선택을 보낼 수 없다.
-  const seen = await on(async page => {
-    await waitUi(page);
-    return page.eval<string>(`typeof window.__ariadne_pick + ',' + typeof window.__ariadneCandidates`);
-  }, true);
-  assert.equal(seen, 'undefined,undefined');
-});
-
-test('TC#39 pickerIgnoresSyntheticClicks', async () => {
-  // 대상 페이지가 합성한 클릭은 선택·완료로 세지 않는다. 핸들러는 격리 world 에 있어도 DOM 이벤트는 페이지가 만들 수 있다.
-  let done = false;
-  const got: unknown[] = [];
-  const page = await Page.open({ picker: { targets: ['본문', 'next', '제목'], onPick: p => got.push(p), onDone: () => { done = true; } } });
-  try {
-    await page.goto(fixture().url, 5000);
-    await waitUi(page);
-    await page.eval(`document.querySelector('div.article.body').click();
-      [...document.querySelectorAll('[data-ariadne-ui] button')].find(b => b.textContent === '완료').click()`);
-    await sleep(300);
-  } finally {
-    page.close();
-  }
-  assert.deepEqual(got, []);
-  assert.equal(done, false);
-});
-
-test('TC#39 pickerIgnoresOtherWindowsPicks', async () => {
-  // 선택 통로는 앱 전역이다 → 한 선택기 창의 클릭이 다른 선택기의 콜백으로 가지 않는다.
-  const got = { a: [] as unknown[], b: [] as unknown[] };
-  const open = (key: 'a' | 'b') => Page.open({ picker: { targets: ['본문'], onPick: p => got[key].push(p), onDone: () => {} } });
-  const [a, b] = [await open('a'), await open('b')];
-  try {
-    const { url } = fixture();
-    await a.goto(url, 5000);
-    await b.goto(url, 5000);
-    await waitUi(b);
-    await b.click('div.article.body');
-    await sleep(300);
-  } finally {
-    a.close();
-    b.close();
-  }
-  assert.equal(got.b.length, 1);
-  assert.deepEqual(got.a, []);
-});
-
-test('TC#39 pickerIgnoresOtherWindowsDone', async () => {
-  const done = { a: false, b: false };
-  const open = (key: 'a' | 'b') => Page.open({ picker: { targets: ['본문'], onPick: () => {}, onDone: () => { done[key] = true; } } });
-  const [a, b] = [await open('a'), await open('b')];
-  try {
-    const { url } = fixture();
-    await a.goto(url, 5000);
-    await b.goto(url, 5000);
-    await waitUi(b);
-    await clickToolbar(b, '완료');
-    await sleep(300);
-  } finally {
-    a.close();
-    b.close();
-  }
-  assert.deepEqual(done, { a: false, b: true });
 });
