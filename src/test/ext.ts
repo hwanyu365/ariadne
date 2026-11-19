@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { type BrowserContext, chromium, type Page as PwPage } from 'playwright-core';
 import type { PickInput, ProbeRunOptions, RunOptions, RunResult } from '../ext/api';
+import { serve, tempDir } from './serve';
 
 export const EXT_DIR = path.join(__dirname, '..', '..', 'ext');
 
@@ -20,7 +21,7 @@ let runs = 0;
 
 /** 확장을 올린 Chromium 하나를 테스트 파일 전체가 같이 쓴다. */
 export function ext(): Promise<Ext> {
-  launched ??= Ext.launch();
+  launched ??= Ext.launch().then(async x => { await x.warmUp(); return x; });
   return launched;
 }
 
@@ -63,6 +64,23 @@ export class Ext {
     this.proc.kill();
     await exited;
     await fs.promises.rm(this.profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
+
+  /** 막 띄운 브라우저의 첫 이동·누르기는 느릴 수 있다 → 테스트 전에 두 페이지를 한 번 받아 데운다. 실패해도 테스트가 판정하므로 넘어간다. */
+  async warmUp(): Promise<void> {
+    const d = tempDir();
+    fs.writeFileSync(path.join(d, 'a.html'), '<meta charset="utf-8"><div id=c>1</div><a class="next" href="b.html">n</a>');
+    fs.writeFileSync(path.join(d, 'b.html'), '<meta charset="utf-8"><div id=c>2</div>');
+    const srv = await serve(d);
+    const tab = await this.newTab();
+    try {
+      await this.scrape(tab, `${srv.base}/a.html`, '#c', '.next', d, 'w', { timeout: 10000 });
+    } catch {
+      // 데우기일 뿐이다
+    } finally {
+      await this.closeTab(tab);
+      await srv.close();
+    }
   }
 
   /** 패널 주소의 페이지를 하나 더 연다. */
