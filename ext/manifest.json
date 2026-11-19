@@ -3,6 +3,7 @@
   "name": "ariadne",
   "version": "0.2.0",
   "description": "페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 받아 둡니다.",
+  "minimum_chrome_version": "126",
   "icons": { "128": "icon.png" },
   "action": { "default_title": "ariadne", "default_icon": "icon.png" },
   "permissions": ["debugger", "declarativeNetRequest", "notifications", "sidePanel", "storage", "webNavigation"],

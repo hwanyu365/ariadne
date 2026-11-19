@@ -4,7 +4,7 @@
 | --- | --- |
 | 문서명 | ariadne specification |
 | 작성자 | hwanyu365 |
-| 작성일 / 최종 수정일 | 2026-10-11 / 2026-11-19 |
+| 작성일 / 최종 수정일 | 2026-10-11 / 2026-11-20 |
 
 - **프로젝트:** 페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 데스크톱 도구
 - **목적 (Why):**
@@ -25,7 +25,7 @@
 | UC3 | 셀렉터를 모를 때 후보를 찾는다 (probe) | P1 | 셀렉터가 틀리면 1페이지만 받고 끝난다 → 실패의 대부분이 여기서 난다 | `docs/spec_selector.md` |
 | UC4 | 화면에서 요소를 클릭해 셀렉터를 얻는다 | P1 | `probe` 의 후보 목록을 화면과 눈으로 대조하는 일이 남아 있다 → 가리키는 편이 짧다 | `docs/spec_selector.md` |
 | UC5 | 창에서 진행 상황을 보고, 지난 입력을 이어 쓴다 | P1 | 같은 사이트의 다음 편을 받을 때마다 셀렉터를 다시 넣고, 수백 페이지 수집이 어디까지 왔는지 로그를 읽어야 안다 | `docs/spec_window.md` |
-| UC6 | Windows·macOS·Linux 에서 설치 없이 실행 파일 하나를 받아 실행한다 | P1 | 개발 도구나 브라우저를 따로 설치해야 하면 개발 환경이 없는 사람은 쓰지 못한다 | `docs/spec_release.md` |
+| UC6 | Windows·macOS·Linux 에서 설치 없이 실행 파일 하나를, 또는 Chrome 확장 zip 하나를 받아 쓴다 | P1 | 개발 도구나 브라우저를 따로 설치해야 하면 개발 환경이 없는 사람은 쓰지 못한다 | `docs/spec_release.md` |
 
 ## 작업 기준 색인
 
@@ -116,6 +116,8 @@
   - Windows x64 portable exe, macOS Apple Silicon zip(.app), Linux x64 AppImage. 모두 설치 없이 실행한다.
   - 세 OS 빌드가 모두 성공해야 Release 를 만든다 → 일부 OS 만 빠진 Release 가 남지 않는다.
   - 코드 서명은 하지 않는다 → 처음 실행할 때 Windows SmartScreen·macOS Gatekeeper 경고가 뜬다.
+  - 같은 Release 에 Chrome 확장 zip 을 첨부한다. 개발자 모드의 "압축해제된 확장 프로그램 로드" 로 설치한다 → 웹 스토어에 등록하지 않는다.
+  - 앱·확장·태그 버전은 package.json 하나로 맞춘다.
 
 - `NFR#13` 수집 창의 원격 페이지는 앱과 사용자 PC 에 닿지 못한다.
   - 새 창(`target=_blank`, `window.open`)을 만들지 않는다 → 수집은 원래 탭만 읽는다.

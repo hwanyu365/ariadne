@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
-  # 태그 전에 세 OS 빌드만 확인한다. Release 는 만들지 않고 산출물을 artifact 로 남긴다.
+  # 태그 전에 세 OS 빌드와 확장 zip 만 확인한다. Release 는 만들지 않고 산출물을 artifact 로 남긴다.
   workflow_dispatch:
 
 permissions:
@@ -53,9 +53,30 @@ jobs:
             release/*.AppImage
           if-no-files-found: error
 
-  # 세 OS 산출물이 모두 있을 때만 Release 를 만든다 → 일부 OS 만 빠진 Release 가 남지 않는다.
+  # 확장 zip 은 OS 와 무관하다 → 한 러너에서 한 번 만든다.
+  ext:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run pack
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ariadne-chrome
+          path: release/*-chrome.zip
+          if-no-files-found: error
+
+  # 세 OS 산출물과 확장 zip 이 모두 있을 때만 Release 를 만든다 → 일부만 빠진 Release 가 남지 않는다.
   release:
-    needs: build
+    needs: [build, ext]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
