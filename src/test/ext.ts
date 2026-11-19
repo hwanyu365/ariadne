@@ -25,16 +25,17 @@ export function ext(): Promise<Ext> {
 }
 
 export class Ext {
-  private constructor(readonly ctx: BrowserContext, readonly id: string, readonly panel: PwPage) {}
+  private constructor(readonly ctx: BrowserContext, readonly id: string, readonly panel: PwPage, private readonly proc: ReturnType<typeof spawn>) {}
 
-  static async launch(): Promise<Ext> {
+  /** dir 의 확장을 올린 Chromium 을 띄운다. 공유 인스턴스는 ext() 로 얻고, 따로 띄운 것은 close() 로 끈다. */
+  static async launch(dir = EXT_DIR): Promise<Ext> {
     // Playwright 가 띄운 브라우저는 페이지마다 포커스를 흉내 내 가려진 탭도 보이는 상태가 된다.
     // 직접 띄우고 기본 설정 없이 붙는다 → 가려진 탭·패널의 동작을 실제처럼 시험한다.
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ariadne-ext-'));
     const proc = spawn(chromium.executablePath(), [
       `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check',
       ...(at ? [`--window-position=${at[1]},${at[2]}`] : []),
-      `--disable-extensions-except=${EXT_DIR}`, `--load-extension=${EXT_DIR}`, 'about:blank',
+      `--disable-extensions-except=${dir}`, `--load-extension=${dir}`, 'about:blank',
     ], { stdio: 'ignore' });
     process.once('exit', () => proc.kill());
     const portFile = path.join(profile, 'DevToolsActivePort');
@@ -53,7 +54,11 @@ export class Ext {
     const panel = await ctx.newPage();
     await panel.goto(`chrome-extension://${id}/panel.html`);
     await panel.waitForFunction(() => 'ariadne' in globalThis);
-    return new Ext(ctx, id, panel);
+    return new Ext(ctx, id, panel, proc);
+  }
+
+  close(): void {
+    this.proc.kill();
   }
 
   /** 패널 주소의 페이지를 하나 더 연다. */
