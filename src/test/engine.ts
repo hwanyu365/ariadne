@@ -27,7 +27,20 @@ async function reachableUrl(url: string) {
 
 type CallOptions = ScrapeOptions & { onPick?: (p: unknown) => void; onTab?: (tab: Tab) => void };
 
+let busy = false;
+
 async function call(kind: Kind, url: string, args: Record<string, unknown>, o: CallOptions, disk?: string): Promise<number> {
+  // 로그·선택값·중지 신호를 패널 전역 하나로 주고받는다 → 겹쳐 부르면 서로 덮으므로 막는다.
+  if (busy) throw new Error('엔진 테스트 어댑터는 한 번에 하나만 부릅니다.');
+  busy = true;
+  try {
+    return await callOnce(kind, url, args, o, disk);
+  } finally {
+    busy = false;
+  }
+}
+
+async function callOnce(kind: Kind, url: string, args: Record<string, unknown>, o: CallOptions, disk?: string): Promise<number> {
   const x = await ext();
   const target = await reachableUrl(url);
   const tab: Tab = await x.newTab();
@@ -36,13 +49,11 @@ async function call(kind: Kind, url: string, args: Record<string, unknown>, o: C
   onTab?.(tab);
   const input = { kind, tabId: tab.id, url: target.url, dir, opts, ...args };
   let seenLogs = 0, seenPicks = 0, draining = Promise.resolve();
-  // 읽어 오기가 겹치면 같은 줄을 두 번 넘기거나 건너뛴다 → 한 번에 하나씩 읽는다.
-  const drain = () => (draining = draining.then(pull));
   const pull = async () => {
     const got = await x.panel.evaluate(([l, p]) => {
       const g = globalThis as unknown as { __logs?: string[]; __picks?: unknown[] };
       return [(g.__logs ?? []).slice(l), (g.__picks ?? []).slice(p)] as const;
-    }, [seenLogs, seenPicks] as const).catch(() => [[], []] as const);
+    }, [seenLogs, seenPicks] as const);
     seenLogs += got[0].length;
     seenPicks += got[1].length;
     for (const line of got[0]) onLog?.(line);
@@ -74,11 +85,14 @@ async function call(kind: Kind, url: string, args: Record<string, unknown>, o: C
       await opener.settled();
     }
   })()`) as Promise<{ pages?: number; error?: string }>;
-  const poll = setInterval(() => { void drain(); }, 50);
+  // 읽어 오기가 겹치면 같은 줄을 두 번 넘기거나 건너뛴다 → 한 번에 하나씩 읽는다.
+  // 도중의 읽기 실패는 다음 읽기가 같은 자리부터 다시 읽는다. 끝난 뒤의 마지막 읽기 실패는 테스트를 실패시킨다 → 로그를 못 읽고 부재 단언이 통과하지 않게 한다.
+  const poll = setInterval(() => { draining = draining.then(pull).catch(() => {}); }, 50);
   try {
     const got = await running;
     clearInterval(poll);
-    await drain();
+    await draining;
+    await pull();
     if (got.error !== undefined) throw new Error(got.error);
     return got.pages ?? 0;
   } finally {
