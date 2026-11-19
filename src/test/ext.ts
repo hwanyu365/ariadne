@@ -64,6 +64,42 @@ export class Ext {
     return p;
   }
 
+  /**
+   * 대상 탭의 창에 패널 화면을 뒤쪽 탭으로 연다 → 그 창의 지금 탭은 대상 탭 그대로다.
+   * settings 는 미리 넣을 저장 설정(undefined 면 비운다), folder 는 고른 폴더로 둘 OPFS 폴더 이름(null 이면 고른 폴더 없음)이다.
+   */
+  async openUi(tab: Tab, o: { settings?: unknown; folder?: string | null } = {}): Promise<PwPage> {
+    await this.panel.evaluate(s => s === undefined ? chrome.storage.local.remove('settings') : chrome.storage.local.set({ settings: s }), o.settings);
+    // tsc 가 import() 를 require 로 바꾼다 → 패널 문서에서 모듈을 부를 때는 식을 글자로 넘긴다.
+    await this.panel.evaluate(`(async () => {
+      const m = await import('./dist/ext/folder.js');
+      const name = ${JSON.stringify(o.folder ?? null)};
+      await m.saveFolder(name ? await (await navigator.storage.getDirectory()).getDirectoryHandle(name, { create: true }) : null);
+    })()`);
+    const opened = this.ctx.waitForEvent('page');
+    await this.panel.evaluate(async ([t, u]) => {
+      await chrome.tabs.create({ windowId: (await chrome.tabs.get(t)).windowId, url: u, active: false });
+    }, [tab.id, `chrome-extension://${this.id}/panel.html`] as const);
+    const ui = await opened;
+    await ui.waitForFunction(() => document.body.dataset.ready === '1', undefined, { timeout: 10000, polling: 50 });
+    return ui;
+  }
+
+  /** OPFS 폴더 안 파일의 글자 내용. */
+  opfsFiles(dir: string): Promise<Record<string, string>> {
+    return this.panel.evaluate(async dir => {
+      const out: Record<string, string> = {};
+      const walk = async (d: FileSystemDirectoryHandle, at: string) => {
+        for await (const [name, h] of d.entries()) {
+          if (h.kind === 'directory') await walk(h as FileSystemDirectoryHandle, `${at}${name}/`);
+          else out[at + name] = await (await (h as FileSystemFileHandle).getFile()).text();
+        }
+      };
+      await walk(await (await navigator.storage.getDirectory()).getDirectoryHandle(dir), '');
+      return out;
+    }, dir);
+  }
+
   /** 새 창에 대상 탭을 만든다. 패널과 다른 창이라 둘 다 보이는 상태로 시작한다. */
   async newTab(url = 'about:blank'): Promise<Tab> {
     const opened = this.ctx.waitForEvent('page');

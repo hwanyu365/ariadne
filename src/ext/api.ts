@@ -51,6 +51,9 @@ export interface PanelApi {
   stop(): void;
   /** 진행 중이거나 마지막 수집의 로그. */
   readonly logs: string[];
+  /** 로그 줄과 선택값이 생길 때마다 받는다. */
+  on(event: 'log', cb: (line: string) => void): void;
+  on(event: 'pick', cb: (p: Picked) => void): void;
 }
 
 declare global {
