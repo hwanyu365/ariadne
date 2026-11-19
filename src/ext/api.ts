@@ -1,7 +1,7 @@
 import type { ProbeOptions, ScrapeOptions } from '../core/engine.js';
 import type { TextKey } from '../core/form.js';
 
-export type RunOptions = Omit<ScrapeOptions, 'signal' | 'onLog' | 'headful'>;
+export type RunOptions = Omit<ScrapeOptions, 'signal' | 'onLog'>;
 export type ProbeRunOptions = Pick<ProbeOptions, 'timeout' | 'delay' | 'titleSel' | 'charset' | 'exclude'>;
 
 export interface ProbeInput {

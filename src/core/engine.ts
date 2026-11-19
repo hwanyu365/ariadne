@@ -26,7 +26,6 @@ export interface Env {
 export interface ScrapeOptions {
   maxPages?: number;
   timeout?: number;
-  headful?: boolean;
   delay?: number;
   digits?: number;
   start?: number;
@@ -167,7 +166,7 @@ async function scrollFor(page: Page, log: Log, selector: string) {
 
 const STOP = Symbol('stop');
 
-/** 중지가 먼저 오면 p 를 기다리지 않는다. 남은 작업은 창을 닫을 때 끝난다. */
+/** 중지가 먼저 오면 p 를 기다리지 않는다. 남은 작업은 페이지를 닫을 때 끝난다. */
 function unlessStopped<T>(p: Promise<T>, signal?: AbortSignal): Promise<T | typeof STOP> {
   if (!signal) return p;
   p.catch(() => {});
@@ -206,7 +205,7 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
   })()`);
   if (!state) return `next 셀렉터 '${nextSel}' 에 걸리는 요소가 없습니다.`;
   let clickError = '';
-  // 새 탭 링크는 눌러도 새 창이 거부돼 아무 일도 없다 → 주소로 넘어간다.
+  // 새 탭 링크는 눌러도 대상 탭이 넘어가지 않는다 → 주소로 넘어간다.
   if (state.clickable && !(state.blank && state.href)) {
     try {
       await page.click(nextSel);
@@ -328,7 +327,7 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
   const keyOf = (url: string, v: string) => sha1(`${url}\n${v}`);
   let firstKey = '', prevUrl = '';
   const moves = new Set<string>();
-  const page = await env.open({ show: !!o.headful, charset });
+  const page = await env.open({ charset });
   const signal = page.interrupted && o.signal ? AbortSignal.any([o.signal, page.interrupted]) : page.interrupted ?? o.signal;
   const stopped = () => page.interrupted?.aborted ? String(page.interrupted.reason) : '사용자 중지.';
   try {
@@ -446,12 +445,9 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
 
 export interface ProbeOptions {
   timeout?: number;
-  headful?: boolean;
   titleSel?: string | null;
   delay?: number;
   onLog?: Log;
-  /** 창을 띄웠을 때 사용자가 확인을 마칠 때까지 기다린다. */
-  pause?: () => Promise<void>;
   charset?: string | null;
   exclude?: string | null;
 }
@@ -459,7 +455,7 @@ export interface ProbeOptions {
 export async function probe(env: Pick<Env, 'open'>, url: string, sel: string | null, nextSel: string | null, o: ProbeOptions = {}): Promise<void> {
   const { timeout = 15000, delay = 0, charset = null } = o;
   const log = o.onLog ?? console.log;
-  const page = await env.open({ show: !!o.headful, charset });
+  const page = await env.open({ charset });
   try {
     await page.goto(url, timeout);
     await sleep(1500 + delay);          // 지연 렌더되는 본문을 놓치지 않도록. 더 느리면 대기 시간을 늘린다.
@@ -499,10 +495,6 @@ export async function probe(env: Pick<Env, 'open'>, url: string, sel: string | n
     for (const c of await page.eval<{ sel: string; n: number; big: number }[]>(`(${IMAGE_CANDIDATES_JS})()`))
       log(`    ${c.sel.padEnd(40)} ${c.n}장 (300px 이상 ${c.big}장)`);
 
-    if (o.headful && o.pause) {
-      log('\n창을 확인한 뒤 [중지] 를 누르면 닫힙니다.');
-      await Promise.race([o.pause(), page.whenClosed()]);
-    }
   } catch (e) {
     // 탭을 잃으면 진행 중이던 평가도 실패한다 → 그 실패가 아니라 탭을 잃은 사유로 끝낸다.
     if (!page.interrupted?.aborted) throw e;
@@ -520,7 +512,7 @@ export interface PickOptions {
   charset?: string | null;
 }
 
-/** 창을 띄우고 사용자가 클릭한 요소의 셀렉터 후보를 onPick 으로 넘긴다. 완료·중지·창 닫기 중 먼저 오는 것에서 끝난다. */
+/** 선택기를 세우고 사용자가 클릭한 요소의 셀렉터 후보를 onPick 으로 넘긴다. 완료·중지·페이지를 잃음 중 먼저 오는 것에서 끝난다. */
 export async function pick(env: Pick<Env, 'open'>, url: string, onPick: (payload: unknown) => void, o: PickOptions = {}): Promise<void> {
   const log = o.onLog ?? console.error;
   let done = false;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULTS, InputError, logLevel, parseInputs, pickUpdate, progress, remember, siteFor, type Raw, type Settings } from './form';
+import { cleanSettings, DEFAULTS, InputError, logLevel, parseInputs, pickUpdate, progress, remember, siteFor, type Raw, type Settings } from './form';
 
 const raw = (over: Partial<Raw> = {}): Raw => ({ ...DEFAULTS, url: 'http://x', sel: '#c', next: '.next', ...over });
 
@@ -122,6 +122,8 @@ test('TC#49 rememberKeepsRecentUrlsAndSitePresets', () => {
   assert.deepEqual(siteFor(s, 'http://a.test/other'), { sel: '#c3', next: '.next', title: '', exclude: '', charset: '', mode: 'image' });
   assert.equal(siteFor(s, 'http://b.test/'), null);
   assert.equal(siteFor(s, 'not a url'), null);
+  // 연재물은 쿼리가 편·페이지를 가리킨다 → 쿼리까지 남긴다.
+  assert.equal(remember(s, raw({ url: 'http://a.test/view?no=7&p=2' }), 'text').recent?.[0], 'http://a.test/view?no=7&p=2');
 });
 
 test('TC#49 siteListIsBounded', () => {
@@ -130,4 +132,26 @@ test('TC#49 siteListIsBounded', () => {
   assert.equal(Object.keys(s.sites ?? {}).length, 50);
   assert.equal(siteFor(s, 'http://h1.test/'), null);
   assert.notEqual(siteFor(s, 'http://h55.test/'), null);
+});
+
+test('TC#48 settingsKeepOnlyKnownKeys', () => {
+  // 저장값 때문에 패널이 안 열리면 안 된다 → 아는 키·맞는 타입만 살린다.
+  for (const broken of [undefined, null, '{', [], 'x', 3]) assert.deepEqual(cleanSettings(broken), {}, String(broken));
+  assert.deepEqual(cleanSettings({ url: 'http://x', sel: 1, 모름: 'x', mode: 'video', merge: 'yes' }), { url: 'http://x' });
+  const values = { url: 'http://x', sel: '#c', max: '5', mode: 'image' as const, merge: true };
+  assert.deepEqual(cleanSettings(JSON.parse(JSON.stringify(values))), values);
+});
+
+test('TC#49 settingsKeepOnlyValidSitesAndRecent', () => {
+  // 사이트 설정도 저장소에서 읽은 값이다 → 형태가 맞는 것만 살리고, 호스트 이름이 객체의 내부 키와 겹쳐도 안전하다.
+  const got = cleanSettings(JSON.parse(JSON.stringify({
+    recent: ['http://a', 3, null, 'http://b'],
+    sites: { 'a.test': { sel: '#c', next: 1, mode: 'video', extra: 'x' }, bad: 'x' },
+  })));
+  assert.deepEqual(got.recent, ['http://a', 'http://b']);
+  assert.deepEqual(got.sites?.['a.test'], { sel: '#c', next: '', title: '', exclude: '', charset: '', mode: 'text' });
+  assert.equal(Object.hasOwn(got.sites ?? {}, 'bad'), false);
+  const sites = cleanSettings(JSON.parse('{"sites": {"__proto__": {"sel": "#p"}}}')).sites ?? {};
+  assert.equal(Object.getPrototypeOf(sites), Object.prototype);
+  assert.equal(({} as Record<string, unknown>).sel, undefined);
 });

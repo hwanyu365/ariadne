@@ -1,6 +1,6 @@
 # ariadne
 
-페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 데스크톱 도구
+페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 Chrome 확장
 
 이 저장소는 agent 가 SDD(Spec-Driven Development) + TDD 로 개발한다.
 사람은 요구사항·결정·리뷰를 맡고, agent 는 스펙·테스트·구현·검증·PR 을 맡는다.
@@ -39,10 +39,11 @@
 
 ## 기술 스택
 
-- Electron + TypeScript
-  - SPA 처럼 URL 이 바뀌지 않는 페이지네이션도 넘겨야 해서 HTTP 클라이언트 대신 실제 브라우저를 쓴다 → 앱에 내장된 Chromium 이라 OS 마다 브라우저를 따로 설치하게 하지 않는다
-  - 페이지 조작은 Playwright 없이 Electron API + CDP 로 한다 → Playwright 는 Electron 자신의 Chromium 에 붙는 방식을 지원하지 않는다
-- 패키징: electron-builder (Windows portable exe, macOS zip, Linux AppImage)
+- Chrome 확장(Manifest V3) + TypeScript
+  - SPA 처럼 URL 이 바뀌지 않는 페이지네이션도 넘겨야 해서 HTTP 클라이언트 대신 실제 브라우저를 쓴다 → 사용자가 보고 있는 탭을 `chrome.debugger`(CDP)로 조작한다
+  - 엔진은 플랫폼 무관 코드(`src/core`)이고, 확장은 Page(대상 탭)·Sink(고른 폴더)만 구현한다(`src/ext`)
+- 패키징: 확장 zip (`npm run pack`, 의존성 없이 직접 묶음). 웹 스토어 없이 Release 로 배포한다
+- 테스트: Playwright(`playwright-core`)의 Chromium 에 확장을 올려 돌린다 → 브랜드 Chrome 은 명령줄로 확장을 올리지 못한다
 - 위 목록 밖의 의존성 추가는 PR 본문에 이유를 적는다.
 
 ## 개발 절차
@@ -54,7 +55,7 @@ SDD + TDD: 이슈 → 스펙 갱신 → TC 작성(Red) → 구현(Green) → Ref
 - 버그: 재현 테스트를 먼저 작성해 실패(Red)를 확인한 뒤 고친다. 스펙과 코드 중 어느 쪽이 틀렸는지 먼저 판정한다.
 - chore(CI·의존성·문서·설정처럼 동작이 바뀌지 않는 변경): `/adk:spec` 은 0단계(이슈·워크트리)만 거치고 스펙·TDD(`/adk:tdd` "지적 반영" 포함)는 건너뛴다. `/adk:verify` 는 검증 명령과 변경 범위만 본다. 단 막는 장치(hook·검사 스크립트·권한 규칙)를 바꿨으면 이전 버전 비교(`/adk:verify` 2-3)도 한다.
   - 스펙 항목이나 사용자에게 보이는 동작이 바뀌면 chore 가 아니다.
-- 테스트 위치: 소스와 같은 디렉터리에 `{module}.test.ts`. 엔진 테스트가 창을 띄우므로 전부 Electron 안에서 돈다 (`src/test-runner.ts`)
+- 테스트 위치: 소스와 같은 디렉터리에 `{module}.test.ts`. 엔진 테스트는 확장을 올린 Chromium 하나를 같이 쓰므로 한 Node 프로세스에서 차례로 돈다 (`src/test-runner.ts`)
 - 리뷰 지적을 고칠 때는 같은 입력이 들어오는 자리를 먼저 전수로 세고 자리마다 테스트를 추가한 뒤 고친다 (`/adk:tdd` "지적 반영").
 - 테스트 이름은 스펙의 `TC#n` 으로 시작한다. 함수 이름이 테스트 이름인 언어는 정의 줄 식별자에 `tc{n}` 토큰을 둔다 (`test_tc9_…`, `TestTC9…`). TC 번호는 저장소 전체에서 고유하다 (`docs/rules_spec.md` §2).
 - 같은 TC 를 통과시키려는 수정이 3번 실패하면 멈추고 보고한다.

@@ -8,7 +8,6 @@ export interface PickerHooks {
 
 export interface OpenOptions {
   charset?: string | null;
-  show?: boolean;
   picker?: PickerHooks;
 }
 

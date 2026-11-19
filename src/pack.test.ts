@@ -56,7 +56,7 @@ test('TC#87 extZipHoldsOnlyExtensionFilesAndLoads', async () => {
     await ui.waitForFunction(() => document.body.dataset.ready === '1', undefined, { timeout: 10000, polling: 50 });
     assert.equal(await ui.evaluate(() => chrome.runtime.getManifest().version), pkgVersion());
   } finally {
-    x.close();
+    await x.close();
   }
 });
 
