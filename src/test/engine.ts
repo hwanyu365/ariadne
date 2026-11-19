@@ -48,6 +48,9 @@ async function callOnce(kind: Kind, url: string, args: Record<string, unknown>, 
   const { onLog, signal, onPick, onTab, cdp, ...opts } = o;
   onTab?.(tab);
   const input = { kind, tabId: tab.id, url: target.url, dir, opts, ...args };
+  // 직전 호출의 로그·선택값이 남아 있으면 첫 읽기가 그것을 이번 호출 것으로 넘긴다 → 읽기를 시작하기 전에 비운다.
+  // 중지 신호도 여기서 새로 만든다 → 엔진이 뜨기 전에 온 중지가 직전 호출의 신호로 가지 않는다.
+  await x.panel.evaluate(() => { Object.assign(globalThis, { __logs: [], __picks: [], __ctl: new AbortController() }); });
   let seenLogs = 0, seenPicks = 0, draining = Promise.resolve();
   const pull = async () => {
     const got = await x.panel.evaluate(([l, p]) => {
@@ -59,14 +62,13 @@ async function callOnce(kind: Kind, url: string, args: Record<string, unknown>, 
     for (const line of got[0]) onLog?.(line);
     for (const p of got[1]) onPick?.(p);
   };
-  const stop = () => { void x.panel.evaluate('globalThis.__ctl?.abort()'); };
+  const stop = () => { x.panel.evaluate('globalThis.__ctl?.abort()').catch(() => {}); };
   signal?.addEventListener('abort', stop, { once: true });
   // tsc 가 import() 를 require 로 바꾼다 → 패널 문서에서 모듈을 부를 때는 식을 글자로 넘긴다.
   const running = x.panel.evaluate(`(async () => {
     const A = ${JSON.stringify(input)};
     const [core, env, sink] = await Promise.all([import('./dist/core/engine.js'), import('./dist/ext/env.js'), import('./dist/ext/sink.js')]);
     const g = globalThis;
-    g.__logs = []; g.__picks = []; g.__ctl = new AbortController();
     const onLog = m => g.__logs.push(m);
     const opener = env.tabOpener(A.tabId, onLog, () => {});
     const hook = ${cdp ?? 'null'};
