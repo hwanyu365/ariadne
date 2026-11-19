@@ -1,72 +1,74 @@
 # ariadne
 
-페이지네이션으로 이어지는 웹 페이지를 끝까지 넘기며 본문 텍스트와 이미지를 로컬 파일로 받아 두는 Chrome 확장.
+A Chrome extension that follows paginated web pages to the end and saves the body text and images to local files.
 
-이름은 미로에서 길을 되짚게 해 준 아리아드네의 실에서 왔다.
+The name comes from Ariadne's thread, which let Theseus retrace his way out of the labyrinth.
 
-- 보고 있는 탭 옆 사이드 패널에 셀렉터를 넣고 시작하면 next 를 끝까지 누르며 페이지마다 파일로 쓴다
-- 셀렉터를 모르면 `요소 선택` 이나 `probe` 로 찾는다
-- URL 이 바뀌지 않는 SPA 도 수집 대상이 실제로 바뀌는지 보고 넘긴다
-- 이미 로그인한 페이지도 그 탭의 세션 그대로 받는다
+- Enter selectors in the side panel next to the tab you are viewing and start → it clicks next until the end and writes each page to a file
+- If you don't know a selector, find it with `요소 선택` (Pick element) or `probe`
+- Also works on SPAs whose URL doesn't change, by checking that the collection target actually changes before moving on
+- Pages you are already logged in to are fetched with that tab's session as-is
 
-## 설치
+## Installation
 
-1. [Releases](https://github.com/hwanyu365/ariadne/releases/latest) 에서 `ariadne-{버전}-chrome.zip` 을 받아 압축을 푼다 → 이 폴더는 지우지 않고 둔다 (Chrome 이 여기서 읽는다)
-2. Chrome 주소창에 `chrome://extensions` → 오른쪽 위 `개발자 모드` 를 켠다
-3. `압축해제된 확장 프로그램을 로드합니다` → 1의 폴더(`manifest.json` 이 있는 폴더)를 고른다
-4. 툴바의 퍼즐 아이콘에서 ariadne 를 고정하고, 받을 페이지에서 ariadne 아이콘을 누르면 사이드 패널이 열린다
+1. Download `ariadne-{version}-chrome.zip` from [Releases](https://github.com/hwanyu365/ariadne/releases/latest) and extract it → keep this folder (Chrome loads the extension from here)
+2. Open `chrome://extensions` in Chrome → turn on `Developer mode` in the top right
+3. `Load unpacked` → select the folder from step 1 (the folder containing `manifest.json`)
+4. Pin ariadne from the puzzle icon in the toolbar, then click the ariadne icon on the page you want to fetch to open the side panel
 
-- Chrome 126 이상. 웹 스토어에는 등록하지 않는다
-- 새 버전은 같은 폴더에 새 zip 을 풀고 `chrome://extensions` 에서 ariadne 의 새로고침(↻)을 누른다
-- 수집하는 동안 탭 위에 "디버깅을 시작했습니다" 배너가 뜬다 → 탭을 조작하는 데 쓰는 연결이다. 배너의 `취소` 를 누르면 수집이 멈춘다
-- 사이드 패널을 닫으면 수집이 멈춘다
+- Requires Chrome 126 or later. Not published on the Chrome Web Store
+- To update, extract the new zip into the same folder and click reload (↻) on ariadne in `chrome://extensions`
+- While collecting, a "started debugging this browser" banner appears above the tab → this is the connection used to drive the tab. Clicking `Cancel` on the banner stops collection
+- Closing the side panel stops collection
 
-## 사용법
+## Usage
 
-| 입력 | 설명 |
+The extension UI is in Korean only. Each UI label below is quoted as shown, followed by its meaning in parentheses.
+
+| Input | Description |
 | --- | --- |
-| URL | 첫 페이지 주소. 기다리는 동안 지금 보는 탭의 주소를 따라간다 → 이어 받을 주소로 고쳐 넣을 수 있다 |
-| 수집 대상 셀렉터 | 텍스트 모드는 본문 컨테이너(`#articleBody`), 이미지 모드는 이미지까지(`#articleBody img`) |
-| next 버튼 셀렉터 | 다음 페이지로 가는 요소 |
-| 제목 셀렉터 | 텍스트 모드에서만. 주면 첫 줄에 `{번호}화. {제목}` 을 붙인다 |
-| 제외 셀렉터 | 텍스트 모드에서만. 본문 안의 광고·작가의 말·댓글 등을 빼고 받는다 (`.ad, .comment`). `요소 선택` 툴바의 `제외` 로도 고른다 |
-| 인코딩 (고급 옵션) | 비우면 브라우저가 추정한다. 한글이 깨지면 `utf-8` 처럼 지정한다 → 로그에 "utf-8 로 보이는데" 경고가 뜨면 이 경우다 |
-| 폴더 | `폴더 선택` 으로 저장할 폴더를 고른다. 다음에도 그 폴더를 쓴다. Chrome 이 쓰기 권한을 거둔 상태면 시작할 때 다시 묻는다 |
-| 접두사 | 폴더 안의 경로. 기본 `page` → `page_0001.txt`, `novel/page` → `novel/page_0001.txt` |
-| 한 파일로도 합치기 (고급 옵션) | 텍스트 모드에서 페이지별 파일과 함께 전체를 `page_all.txt` 하나로도 남긴다 |
+| URL | Address of the first page. While idle, it follows the address of the current tab → you can edit it to resume from another address |
+| `수집 대상` (target) | Text mode: the body container (`#articleBody`); image mode: down to the images (`#articleBody img`) |
+| `next 버튼` (next button) | The element that goes to the next page |
+| `제목 (선택)` (title, optional) | Text mode only. If given, `{number}화. {title}` is added as the first line (`화` means "episode") |
+| `제외 (선택)` (exclude, optional) | Text mode only. Skips ads, author's notes, comments, etc. inside the body (`.ad, .comment`). Can also be picked with `제외` in the `요소 선택` toolbar |
+| `인코딩` (encoding, advanced) | Leave empty to let the browser guess. If text is garbled, specify e.g. `utf-8` → this is the case when the log shows a warning starting with `경고: 페이지는 utf-8 로 보이는데` (the page looks like utf-8) |
+| `폴더` (folder) | Choose the save folder with `폴더 선택` (choose folder). The same folder is used next time. If Chrome has revoked write permission, it asks again on start |
+| `접두사` (prefix) | Path inside the folder. Default `page` → `page_0001.txt`, `novel/page` → `novel/page_0001.txt` |
+| `한 파일로도 합치기` (also merge into one file, advanced) | In text mode, also writes everything to a single `page_all.txt` alongside the per-page files |
 
-- **셀렉터를 모를 때는 `요소 선택`** → 지금 탭에 툴바가 뜨고 마우스를 올린 요소가 빨갛게 표시된다. 클릭하면 셀렉터 후보가 매치 수와 함께 뜨고, 고른 것이 입력란에 들어간다.
-  - 페이지 위 툴바에서 본문·next·제목·제외를 전환한다.
-  - 매치 수가 1이 아니면 경고가 붙는다 → 상태 클래스가 섞여 다음 페이지에서 깨질 수 있다는 뜻이다.
-  - 툴바가 고르려는 요소를 가리면 `위치` 로 옮긴다. 다 고르면 `완료` 또는 패널의 `중지`.
-- `probe` 는 후보를 목록으로 훑어볼 때 쓴다 → next·본문·이미지 후보와 iframe 유무를 로그에 뽑아 준다.
-- 수집 중 `중지` 는 현재 페이지를 마친 뒤 멈춘다. 그때까지 받은 파일은 남는다.
-- 끝나면 로그 위에 결과(받은 페이지 수·걸린 시간·멈춘 사유·저장한 폴더)가 뜬다.
-  - 중간에 끊겼으면 로그의 `마지막으로 받은 페이지: {번호}번 {주소}` 를 URL·시작 번호에 넣고 다시 시작한다.
-  - 같은 저장 경로에 이미 파일이 있으면 경고를 남기고 덮어쓴다.
-- 단축키: `Ctrl+Enter`(macOS `⌘↵`) 수집 시작, `Esc` 중지. 하단 상태바에 받은 페이지 수·마지막 파일·경과 시간이 뜬다.
-- 숫자 옵션·인코딩은 `고급 옵션` 을 펼쳐서 바꾼다.
-- 수집을 시작한 URL 은 최근 10개까지 URL 입력란 목록에 남는다.
-  - 사이트(호스트)마다 셀렉터를 기억한다 → 다른 사이트의 탭으로 옮기면 그 사이트에서 쓰던 셀렉터가 채워진다.
-- 입력값은 확장의 저장소(`chrome.storage`)에 남는다. 지우려면 확장을 제거한다.
-- 패널을 보고 있지 않을 때 수집이 끝나면 Chrome 알림으로 알린다.
+- **If you don't know a selector, use `요소 선택` (Pick element)** → a toolbar appears on the current tab and the hovered element is highlighted in red. Click to see selector candidates with match counts; the one you choose goes into the input.
+  - Switch between `본문` (body), `next`, `제목` (title) and `제외` (exclude) from the toolbar on the page.
+  - A warning is shown if the match count isn't 1 → state classes may be mixed in and break on the next page.
+  - If the toolbar covers the element you want, move it with `↕ 위치` (position). When done, click `완료` (done) on the toolbar or `중지` (stop) in the panel.
+- Use `probe` to scan candidates as a list → it logs next, body and image candidates and whether iframes are present.
+- `중지` (stop) during collection stops after finishing the current page. Files fetched so far are kept.
+- When finished, a result summary (pages fetched, elapsed time, stop reason, save folder) appears above the log.
+  - If interrupted, take `마지막으로 받은 페이지: {number}번 {address}` (last page fetched) from the log, put the address into URL and the number into `시작 번호` (start number), then start again.
+  - If files already exist at the same save path, it logs a warning and overwrites them.
+- Shortcuts: `Ctrl+Enter` (macOS `⌘↵`) to start, `Esc` to stop. The status bar at the bottom shows pages fetched, last file and elapsed time.
+- Numeric options and encoding are under `고급 옵션` (advanced options).
+- Up to the 10 most recent start URLs are kept in the URL input list.
+  - Selectors are remembered per site (host) → switching to a tab on another site fills in the selectors used there.
+- Inputs are kept in the extension's storage (`chrome.storage`). Uninstall the extension to clear them.
+- If collection finishes while you aren't looking at the panel, a Chrome notification tells you.
 
-## 안 되는 것
+## Not supported
 
-- 로그인·캡차·결제를 대신 처리하는 것, iframe 안의 본문
-- 받은 파일의 후처리(ePub 변환, 이미지 합치기)
-- 명령줄 실행
-- 수집 대상 사이트의 이용약관·robots 정책 준수는 사용자 책임이다
+- Handling login, CAPTCHA or payment for you; body content inside iframes
+- Post-processing of fetched files (ePub conversion, merging images)
+- Command-line execution
+- Complying with the target site's terms of use and robots policy is the user's responsibility
 
-## 개발
+## Development
 
-이 저장소는 [ADD](https://github.com/hwanyu365/add-project) 로 개발한다. 규칙은 [CLAUDE.md](CLAUDE.md), 스펙은 [docs/specification.md](docs/specification.md).
+This repository is developed with [ADD](https://github.com/hwanyu365/add-project). Rules are in [CLAUDE.md](CLAUDE.md), the spec is in [docs/specification.md](docs/specification.md).
 
 ```sh
 npm ci
-npx playwright-core install chromium   # 테스트용 Chromium
-npm run verify     # 검증 (CI 와 같은 명령)
-npm run pack       # 확장 zip → release/
+npx playwright-core install chromium   # Chromium for tests
+npm run verify     # verification (same command as CI)
+npm run pack       # extension zip → release/
 ```
 
-- 빌드한 확장(`ext/`)은 `npm run build` 뒤 `chrome://extensions` 에서 `ext` 폴더를 올려 바로 써 볼 수 있다
+- After `npm run build`, you can try the built extension (`ext/`) right away by loading the `ext` folder in `chrome://extensions`
