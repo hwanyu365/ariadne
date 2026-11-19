@@ -33,6 +33,10 @@ stream.on('test:complete', d => {
     failed++;
     // 요약을 기다리지 않고 끝내므로 실패 사유는 여기서 바로 남긴다.
     console.error(`\n✖ ${d.name}\n${d.details.error?.cause ?? d.details.error}`);
+    // 엔진 테스트는 로그를 남기지 않는 것이 많다 → 마지막 엔진 호출의 로그를 함께 보여 멈춘 사유를 남긴다.
+    const adapter = require.cache[path.join(__dirname, 'test', 'engine.js')]?.exports as { lastLogs?: () => readonly string[] } | undefined;
+    const logs = adapter?.lastLogs?.() ?? [];
+    if (logs.length) console.error(`  마지막 엔진 호출의 로그:\n${logs.map(l => `    ${l}`).join('\n')}`);
   }
   if (completed === queued && started.size === all.length) setImmediate(finish);
 });

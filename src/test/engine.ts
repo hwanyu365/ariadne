@@ -28,6 +28,12 @@ async function reachableUrl(url: string) {
 type CallOptions = ScrapeOptions & { onPick?: (p: unknown) => void; onTab?: (tab: Tab) => void };
 
 let busy = false;
+let last: string[] = [];
+
+/** 마지막 호출의 엔진 로그. 로그를 남기지 않는 테스트가 실패했을 때 사유를 보이는 데 쓴다. */
+export function lastLogs(): readonly string[] {
+  return last;
+}
 
 async function call(kind: Kind, url: string, args: Record<string, unknown>, o: CallOptions, disk?: string): Promise<number> {
   // 로그·선택값·중지 신호를 패널 전역 하나로 주고받는다 → 겹쳐 부르면 서로 덮으므로 막는다.
@@ -42,55 +48,60 @@ async function call(kind: Kind, url: string, args: Record<string, unknown>, o: C
 
 async function callOnce(kind: Kind, url: string, args: Record<string, unknown>, o: CallOptions, disk?: string): Promise<number> {
   const x = await ext();
-  const target = await reachableUrl(url);
-  const tab: Tab = await x.newTab();
-  const dir = disk ? await x.upload(disk) : null;
   const { onLog, signal, onPick, onTab, cdp, ...opts } = o;
-  onTab?.(tab);
-  const input = { kind, tabId: tab.id, url: target.url, dir, opts, ...args };
-  // 직전 호출의 로그·선택값이 남아 있으면 첫 읽기가 그것을 이번 호출 것으로 넘긴다 → 읽기를 시작하기 전에 비운다.
-  // 중지 신호도 여기서 새로 만든다 → 엔진이 뜨기 전에 온 중지가 직전 호출의 신호로 가지 않는다.
-  await x.panel.evaluate(() => { Object.assign(globalThis, { __logs: [], __picks: [], __ctl: new AbortController() }); });
-  let seenLogs = 0, seenPicks = 0, draining = Promise.resolve();
-  const pull = async () => {
-    const got = await x.panel.evaluate(([l, p]) => {
-      const g = globalThis as unknown as { __logs?: string[]; __picks?: unknown[] };
-      return [(g.__logs ?? []).slice(l), (g.__picks ?? []).slice(p)] as const;
-    }, [seenLogs, seenPicks] as const);
-    seenLogs += got[0].length;
-    seenPicks += got[1].length;
-    for (const line of got[0]) onLog?.(line);
-    for (const p of got[1]) onPick?.(p);
-  };
+  const logs: string[] = [];
+  last = logs;
+  const target = await reachableUrl(url);
+  let tab: Tab | null = null, dir: string | null = null, poll: ReturnType<typeof setInterval> | undefined;
   const stop = () => { x.panel.evaluate('globalThis.__ctl?.abort()').catch(() => {}); };
-  signal?.addEventListener('abort', stop, { once: true });
-  // tsc 가 import() 를 require 로 바꾼다 → 패널 문서에서 모듈을 부를 때는 식을 글자로 넘긴다.
-  const running = x.panel.evaluate(`(async () => {
-    const A = ${JSON.stringify(input)};
-    const [core, env, sink] = await Promise.all([import('./dist/core/engine.js'), import('./dist/ext/env.js'), import('./dist/ext/sink.js')]);
-    const g = globalThis;
-    const onLog = m => g.__logs.push(m);
-    const opener = env.tabOpener(A.tabId, onLog, () => {});
-    const hook = ${cdp ?? 'null'};
-    const open = async o => { const p = await opener.open(o); if (hook) p.send = hook(p.send); return p; };
-    const root = A.dir ? await (await navigator.storage.getDirectory()).getDirectoryHandle(A.dir) : null;
-    const e = { open, sink: prefix => sink.fsaSink(root, prefix) };
-    const o = { ...A.opts, onLog, signal: g.__ctl.signal };
-    try {
-      if (A.kind === 'scrape') return { pages: await core.scrape(e, A.url, A.sel, A.nextSel, A.prefix, o) };
-      if (A.kind === 'probe') { await core.probe(e, A.url, A.sel, A.nextSel, o); return { pages: 0 }; }
-      await core.pick(e, A.url, p => g.__picks.push(p), o);
-      return { pages: 0 };
-    } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) };
-    } finally {
-      await opener.settled();
-    }
-  })()`) as Promise<{ pages?: number; error?: string }>;
-  // 읽어 오기가 겹치면 같은 줄을 두 번 넘기거나 건너뛴다 → 한 번에 하나씩 읽는다.
-  // 도중의 읽기 실패는 다음 읽기가 같은 자리부터 다시 읽는다. 끝난 뒤의 마지막 읽기 실패는 테스트를 실패시킨다 → 로그를 못 읽고 부재 단언이 통과하지 않게 한다.
-  const poll = setInterval(() => { draining = draining.then(pull).catch(() => {}); }, 50);
+  // 준비 중에 던져도 연 탭·서버·폴더를 남기지 않는다.
   try {
+    tab = await x.newTab();
+    dir = disk ? await x.upload(disk) : null;
+    onTab?.(tab);
+    const input = { kind, tabId: tab.id, url: target.url, dir, opts, ...args };
+    // 직전 호출의 로그·선택값이 남아 있으면 첫 읽기가 그것을 이번 호출 것으로 넘긴다 → 읽기를 시작하기 전에 비운다.
+    // 중지 신호도 여기서 새로 만든다 → 엔진이 뜨기 전에 온 중지가 직전 호출의 신호로 가지 않는다.
+    await x.panel.evaluate(() => { Object.assign(globalThis, { __logs: [], __picks: [], __ctl: new AbortController() }); });
+    let seenLogs = 0, seenPicks = 0, draining = Promise.resolve();
+    const pull = async () => {
+      const got = await x.panel.evaluate(([l, p]) => {
+        const g = globalThis as unknown as { __logs?: string[]; __picks?: unknown[] };
+        return [(g.__logs ?? []).slice(l), (g.__picks ?? []).slice(p)] as const;
+      }, [seenLogs, seenPicks] as const);
+      seenLogs += got[0].length;
+      seenPicks += got[1].length;
+      logs.push(...got[0]);
+      for (const line of got[0]) onLog?.(line);
+      for (const p of got[1]) onPick?.(p);
+    };
+    signal?.addEventListener('abort', stop, { once: true });
+    // tsc 가 import() 를 require 로 바꾼다 → 패널 문서에서 모듈을 부를 때는 식을 글자로 넘긴다.
+    const running = x.panel.evaluate(`(async () => {
+      const A = ${JSON.stringify(input)};
+      const [core, env, sink] = await Promise.all([import('./dist/core/engine.js'), import('./dist/ext/env.js'), import('./dist/ext/sink.js')]);
+      const g = globalThis;
+      const onLog = m => g.__logs.push(m);
+      const opener = env.tabOpener(A.tabId, onLog, () => {});
+      const hook = ${cdp ?? 'null'};
+      const open = async o => { const p = await opener.open(o); if (hook) p.send = hook(p.send); return p; };
+      const root = A.dir ? await (await navigator.storage.getDirectory()).getDirectoryHandle(A.dir) : null;
+      const e = { open, sink: prefix => sink.fsaSink(root, prefix) };
+      const o = { ...A.opts, onLog, signal: g.__ctl.signal };
+      try {
+        if (A.kind === 'scrape') return { pages: await core.scrape(e, A.url, A.sel, A.nextSel, A.prefix, o) };
+        if (A.kind === 'probe') { await core.probe(e, A.url, A.sel, A.nextSel, o); return { pages: 0 }; }
+        await core.pick(e, A.url, p => g.__picks.push(p), o);
+        return { pages: 0 };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      } finally {
+        await opener.settled();
+      }
+    })()`) as Promise<{ pages?: number; error?: string }>;
+    // 읽어 오기가 겹치면 같은 줄을 두 번 넘기거나 건너뛴다 → 한 번에 하나씩 읽는다.
+    // 도중의 읽기 실패는 다음 읽기가 같은 자리부터 다시 읽는다. 끝난 뒤의 마지막 읽기 실패는 테스트를 실패시킨다 → 로그를 못 읽고 부재 단언이 통과하지 않게 한다.
+    poll = setInterval(() => { draining = draining.then(pull).catch(() => {}); }, 50);
     const got = await running;
     clearInterval(poll);
     await draining;
@@ -101,7 +112,7 @@ async function callOnce(kind: Kind, url: string, args: Record<string, unknown>, 
     clearInterval(poll);
     signal?.removeEventListener('abort', stop);
     if (dir && disk) await x.download(dir, disk);
-    await x.closeTab(tab);
+    if (tab) await x.closeTab(tab);
     await target.close();
   }
 }
