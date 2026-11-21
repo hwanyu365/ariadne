@@ -51,6 +51,14 @@ const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>(r => {
   function done() { clearTimeout(t); signal?.removeEventListener('abort', done); r(); }
   signal?.addEventListener('abort', done, { once: true });
 });
+const LOST_GRACE = 1000;
+
+/** 탭을 잃은 신호는 그 일로 실패한 호출보다 늦게 올 수 있다 → 실패로 끝내기 전에 잠시 기다려 본다. */
+async function lostSoon(page: Page): Promise<boolean> {
+  if (!page.interrupted) return false;
+  await sleep(LOST_GRACE, page.interrupted);
+  return page.interrupted.aborted;
+}
 const pad = (n: number, digits: number) => String(n).padStart(digits, '0');
 const q = JSON.stringify;
 const firstLine = (e: unknown) => String(e instanceof Error ? e.message : e).split('\n')[0];
@@ -212,7 +220,10 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
       return null;
     } catch (e) {
       clickError = `next 를 누르지 못했습니다: ${firstLine(e)}`;
-      if (!state.href) return clickError;
+      if (!state.href) {
+        if (await lostSoon(page)) throw e;
+        return clickError;
+      }
     }
   }
   // 숨김·비활성이어도 href 가 살아 있으면 직접 이동한다.
@@ -224,6 +235,7 @@ async function gotoNext(page: Page, nextSel: string, timeout: number): Promise<s
     try {
       await page.goto(to.href, timeout);
     } catch (e) {
+      if (await lostSoon(page)) throw e;
       return `${clickError ? `${clickError} ` : ''}next 의 주소로 이동하지 못했습니다: ${firstLine(e)}`;
     }
     return null;
@@ -434,7 +446,7 @@ export async function scrape(env: Env, url: string, sel: string, nextSel: string
     }
   } catch (e) {
     // 탭을 잃으면 진행 중이던 평가·요청도 실패한다 → 그 실패가 아니라 탭을 잃은 사유로 멈춘다.
-    if (!page.interrupted?.aborted) throw e;
+    if (!await lostSoon(page)) throw e;
     log(`  중단: ${stopped()}`);
   } finally {
     if (last) log(`  마지막으로 받은 페이지: ${last}`);
@@ -497,8 +509,8 @@ export async function probe(env: Pick<Env, 'open'>, url: string, sel: string | n
 
   } catch (e) {
     // 탭을 잃으면 진행 중이던 평가도 실패한다 → 그 실패가 아니라 탭을 잃은 사유로 끝낸다.
-    if (!page.interrupted?.aborted) throw e;
-    log(`  중단: ${String(page.interrupted.reason)}`);
+    if (!await lostSoon(page)) throw e;
+    log(`  중단: ${String(page.interrupted?.reason)}`);
   } finally {
     page.close();
   }

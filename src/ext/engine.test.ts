@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import type { RunOptions, RunResult } from './api';
+import { probe, scrape } from '../test/engine';
 import { ext, type Tab } from '../test/ext';
 import { type Handler, serve, staticFile, tempDir } from '../test/serve';
 
@@ -447,6 +448,69 @@ test('TC#69 extStopsWhenUserNavigates', async () => {
     await tab.page.goBack({ waitUntil: 'commit' });
   });
   assert.match(joined(back.r), /중단: 대상 탭이 다른 페이지로 이동했습니다\./);
+});
+
+/** 고른 CDP 호출을 실패로 돌려주면서 탭을 잃게 하는 명령을 보낸다 → 탭을 잃은 신호가 그 실패보다 늦게 온다. */
+const failThenLose = (hit: string, lose: string) => `send => {
+  let done = false;
+  return (method, params) => {
+    if (!done && (${hit})(method, params)) {
+      done = true;
+      send(${lose}).catch(() => {});
+      return Promise.reject(new Error('Inspected target navigated or closed'));
+    }
+    return send(method, params);
+  };
+}`;
+const failThenUserNavigates = (hit: string) => failThenLose(hit, `'Page.navigate', { url: 'about:blank#typed', transitionType: 'typed' }`);
+
+async function stuckFile() {
+  const d = tempDir();
+  write(path.join(d, 'stuck.html'), pageHtml('본문 1', '<button class=next>next</button>'));
+  return { url: pathToFileURL(path.join(d, 'stuck.html')).href, prefix: path.join(tempDir(), 'p') };
+}
+
+test('TC#69 extUserNavigationAfterFailedEvalStops', async () => {
+  const { url, prefix } = await stuckFile();
+  const logs: string[] = [];
+  await scrape(url, '#c', '.next', prefix, {
+    timeout: 5000, onLog: m => logs.push(m),
+    cdp: failThenUserNavigates(`(m, p) => m === 'Runtime.evaluate' && String(p?.expression).includes('aria-disabled')`),
+  });
+  assert.match(logs.join('\n'), /중단: 대상 탭이 다른 페이지로 이동했습니다\.[\s\S]*마지막으로 받은 페이지: 1번/);
+});
+
+test('TC#69 extUserNavigationAfterFailedClickStops', async () => {
+  const { url, prefix } = await stuckFile();
+  const logs: string[] = [];
+  await scrape(url, '#c', '.next', prefix, {
+    timeout: 5000, onLog: m => logs.push(m),
+    cdp: failThenUserNavigates(`m => m === 'Input.dispatchMouseEvent'`),
+  });
+  assert.match(logs.join('\n'), /중단: 대상 탭이 다른 페이지로 이동했습니다\./);
+  assert.doesNotMatch(logs.join('\n'), /next 를 누르지 못했습니다/);
+});
+
+test('TC#69 extUserNavigationAfterFailedNextAddressStops', async () => {
+  const d = tempDir();
+  write(path.join(d, 'a.html'), pageHtml('본문 1', '<a class="next" aria-disabled="true" href="b.html">next</a>'));
+  const logs: string[] = [];
+  await scrape(pathToFileURL(path.join(d, 'a.html')).href, '#c', '.next', path.join(tempDir(), 'p'), {
+    timeout: 5000, onLog: m => logs.push(m),
+    cdp: failThenUserNavigates(`(m, p) => m === 'Page.navigate' && String(p?.url).endsWith('/b.html')`),
+  });
+  assert.match(logs.join('\n'), /중단: 대상 탭이 다른 페이지로 이동했습니다\./);
+  assert.doesNotMatch(logs.join('\n'), /next 의 주소로 이동하지 못했습니다/);
+});
+
+test('TC#74 extProbeTabClosedAfterFailedEvalStops', async () => {
+  const { url } = await stuckFile();
+  const logs: string[] = [];
+  await probe(url, '#c', '.next', {
+    timeout: 5000, onLog: m => logs.push(m),
+    cdp: failThenLose(`m => m === 'Runtime.evaluate'`, `'Page.close'`),
+  });
+  assert.match(logs.join('\n'), /중단: 대상 탭이 닫혔습니다\./);
 });
 
 test('TC#69 extEngineMovesDoNotStop', async () => {
