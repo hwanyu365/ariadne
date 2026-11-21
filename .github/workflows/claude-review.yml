@@ -41,7 +41,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends bubblewrap socat
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - id: claude
-        uses: anthropics/claude-code-action@9eb012b6d0900c2b9eede65ee1758cec4d2973e9 # v1.0.270
+        uses: anthropics/claude-code-action@4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8 # v1.0.275
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # 파일 도구가 저장소 밖(러너의 자격 파일, /proc 의 환경 변수)을 읽지 못하게 한다.
@@ -57,7 +57,7 @@ jobs:
             확인할 것
             - CLAUDE.md 의 원칙(비밀값, 단일 검증 명령, 보안 경계 mutation, 테스트 위치·TC 이름)을 지켰는지
             - 동작이 바뀌었는데 docs/ 의 스펙이 갱신되지 않았거나, 새 요구사항에 대응 TC 가 없는지
-            - 테스트·검사가 지워지거나 약화됐는지: Red 에서 만든 테스트, 기존 테스트의 skip·timeout 확대·snapshot 갱신, lint·검사 suppression. 약화마다 무엇이 약해졌는지 이름으로 적는다
+            - 테스트·검사가 지워지거나 약화됐는지: Red 에서 만든 테스트, 기존 테스트의 skip·timeout 확대·snapshot 갱신, lint·검사 suppression (문구 값 chore 에서 단언 자리·비교 방식을 두고 기대 문자열만 바꾼 것은 약화가 아니다). 약화마다 무엇이 약해졌는지 이름으로 적는다
             - 같은 입력을 읽거나 같은 산출물을 만드는 다른 경로가 고쳐지지 않은 채 남았는지
             - 추가·수정한 주석이 코드와 맞는지
             - 버그와 보안 문제를 우선하고, 취향 문제는 남기지 않는다
@@ -73,7 +73,8 @@ jobs:
             - 이번 PR 이 만들지 않은 기존 결함은 Nits 에 두고 제목 끝에 원래 등급과 함께 `(기존·Blocking)` 처럼 단다 → 후속 이슈 후보이고, 이슈에 원래 등급을 옮긴다. 이번 변경으로 그 결함에 닿는 경로가 새로 생기거나 영향이 커졌으면 원래 등급의 버킷에 둔다.
 
             이전 라운드
-            - `gh pr view --comments` 로 이전 리뷰 요약과 "리뷰 대응" 코멘트를 읽는다. "리뷰 대응" 이 처리 기록이다.
+            - `gh pr view <PR NUMBER> --json body,comments` 로 PR 본문, 이전 리뷰 요약과 "리뷰 대응" 코멘트를 읽는다. "리뷰 대응" 이 처리 기록이다.
+            - `gh pr view` 는 `--json` 으로 필드를 정해 쓴다 → 필드를 정하지 않으면 check 상태까지 조회해 이 job 의 권한으로는 실패한다.
             - 이전 항목 ID 는 그대로 쓰고, 새 항목은 이어지는 번호를 쓴다.
             - 미반영 근거가 적힌 항목은 그 근거를 확인한다. 새 근거 없이 같은 지적을 다시 올리지 않는다.
             - 재리뷰는 이전 리뷰 HEAD 이후 바뀐 부분(`git diff <이전 HEAD> <현재 HEAD>`)과 이월 항목을 본다. 바뀌지 않은 코드에서 새로 찾은 Blocking·Should Fix 는 버킷에 두고, 정리 Nits 는 건수만 결론에 적는다. 이전 HEAD 를 읽을 수 없으면 전체를 본다.
@@ -100,7 +101,9 @@ jobs:
             ## 결론
             - Blocking 유무와 머지 판정
             - 실제로 돌린 명령과 결과 / 돌리지 못한 것 (검증 명령·테스트는 같은 PR 의 CI 가 돌린다 → 이 실행은 돌리지 않는다. 남기는 것은 막힌 이유와 필요한 것을 적는다)
+          # action 은 opt-out 조건이 없으면 auto mode 로 시작해 허용 규칙 밖 호출을 안전성 검토에 넘긴다 → 권한 모드를 정해 허용 목록을 상한으로 둔다.
           claude_args: |
+            --permission-mode default
             --max-turns 60
             --allowedTools "Edit(./.claude-review/summary.md),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
       # 요약을 올리지 못하고 끝나도 action 은 성공으로 남는다 → 현재 head 의 요약이 없으면 check 를 실패시킨다. 작성자 판정은 merge-gate.sh 와 같다.

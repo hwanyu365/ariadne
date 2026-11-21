@@ -1,5 +1,5 @@
 name: 유지보수 (chore)
-description: 동작이 바뀌지 않는 변경 — CI, 의존성, 문서, 설정
+description: 동작이 바뀌지 않는 변경 — CI, 의존성, 문서, 설정, 문자열 값만 바꾸는 문구
 body:
   - type: textarea
     id: what
@@ -11,6 +11,6 @@ body:
     id: no-behavior-change
     attributes:
       label: 동작이 바뀌지 않는 근거
-      description: 스펙 항목이나 사용자에게 보이는 동작이 바뀌면 기능·버그 이슈로 쓴다.
+      description: 스펙 항목이나 사용자에게 보이는 동작이 바뀌면 기능·버그 이슈로 쓴다. 문구·번역·오타처럼 문자열 값만 바꾸는 변경은 chore 다. 문구가 새로 생기거나 키·조건·형식이 함께 바뀌면 chore 가 아니다.
     validations:
       required: true

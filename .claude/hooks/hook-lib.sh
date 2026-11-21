@@ -15,14 +15,15 @@ load() {
 }
 
 # 단순 명령 앞의 셸 예약어, VAR=값, 실행을 감싸는 명령(env·timeout 등)과 그 옵션을 벗긴다.
-# 벗길 낱말 수를 drop 에, 붙은 환경변수 이름을 envs(" A B ") 에 남긴다 → 부르는 쪽이 shift "$drop" 한다.
+# 벗길 낱말 수를 drop 에, 붙은 환경변수 이름을 envs(" A B ") 에, 감싸는 명령을 벗겼으면 wrapped=1 을 남긴다 → 부르는 쪽이 shift "$drop" 한다.
 unwrap() {
-  drop=0; envs=" "
+  drop=0; envs=" "; wrapped=""
   while [ $# -gt 0 ]; do
     case $1 in
       if|then|else|elif|do|while|until) shift; drop=$((drop + 1)); continue ;;
       [A-Za-z_]*=*) envs="$envs${1%%=*} "; shift; drop=$((drop + 1)); continue ;;
     esac
+    case ${1##*/} in env|timeout|nice|nohup|time|command|exec|builtin|sudo|doas|xargs|setsid|stdbuf|ionice|taskset|chrt|flock) wrapped=1 ;; esac
     case ${1##*/} in
       env)
         shift; drop=$((drop + 1))

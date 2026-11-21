@@ -23,6 +23,8 @@
       "Bash(gh pr comment:*)",
       "Bash(gh pr ready:*)",
       "Bash(gh pr merge --squash:*)",
+      "Bash(gh stack merge:*)",
+      "Bash(gh stack view:*)",
       "Bash(git worktree remove:*)"
     ],
     "deny": [

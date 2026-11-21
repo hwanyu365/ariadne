@@ -63,7 +63,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends bubblewrap socat
       - if: steps.secret.outputs.ok == 'true'
-        uses: anthropics/claude-code-action@9eb012b6d0900c2b9eede65ee1758cec4d2973e9 # v1.0.270
+        uses: anthropics/claude-code-action@4d75e5f390ee76b2e09c1980ecc99ff3a2e088c8 # v1.0.275
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # 파일 도구가 저장소 밖(러너의 자격 파일, /proc 의 환경 변수)을 읽지 못하게 한다.
@@ -72,7 +72,9 @@ jobs:
           additional_permissions: |
             contents: read
             actions: read
+          # action 은 opt-out 조건이 없으면 auto mode 로 시작해 허용 규칙 밖 호출을 안전성 검토에 넘긴다 → 권한 모드를 정해 허용 목록을 상한으로 둔다.
           claude_args: |
+            --permission-mode acceptEdits
             --max-turns 40
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git status:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh run view:*),Bash(npm run verify),Bash(xvfb-run -a npm run verify)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Bash(git add:*),Bash(git commit:*),Bash(git rm:*),Bash(git push:*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
