@@ -18,6 +18,7 @@
 - **비밀값은 커밋하지 않는다.** 값은 로컬 파일(`.gitignore` 대상) 또는 환경변수·CI Secrets 로만 주입한다.
   - 비밀값이 없어도 빌드·테스트는 통과해야 한다 → CI 와 fork PR 이 secret 없이 돈다.
 - **검증 명령은 하나다.** 로컬과 CI 가 같은 명령을 실행해, 로컬 통과가 CI 통과를 뜻하게 한다.
+  - 예외는 로컬 `verify.sh` 의 건너뛰기 하나다 → 마지막 전체 통과 뒤 `.github/verify-skip-paths` 범위 안 파일만 바뀌면 검증 명령을 건너뛴다. CI 는 항상 전체를 돌린다 → 범위에 검증 명령이 읽는 경로가 들어가면 로컬 통과가 CI 통과를 뜻하지 않는다.
 - **실제 보안 경계(권한 규칙·인증 검사)는 조건마다 테스트를 두고, 조건을 하나씩 지워 테스트가 실패하는지(mutation) 확인한다.** 결과는 PR 본문에 남긴다.
 - **무언가를 막는 장치(hook·검사 스크립트·권한 규칙)는 허용 목록으로 만든다.** 거부 목록은 생각하지 못한 변형이 통과한다.
   - 고칠 때 허용 목록을 거부 목록으로 바꾸거나 "이런 형태는 검사하지 않는다" 는 예외를 넣지 않는다 → 그 예외가 다음 구멍이 된다. 범위를 넓혀야 하면 허용하는 것을 늘린다.
@@ -75,6 +76,7 @@ npm run verify
 ```
 
 - agent 는 `sh .claude/hooks/verify.sh` 로 실행한다 → 같은 명령에 추적성 검사를 더해 돌리고, 통과한 작업 트리를 기록한다.
+  - 마지막 전체 통과 트리 대비 바뀐 파일이 모두 `.github/verify-skip-paths`(한 줄에 pathspec 하나) 범위 안이면 검증 명령을 건너뛰고 작업 트리만 기록한다. 바뀐 파일이 없거나, 범위 파일·`verify.sh` 가 바뀌었거나, 판정하지 못하면 전체를 돌린다.
   - 통과 뒤 작업 트리(미추적 파일 포함)가 바뀌면 커밋 직전 git pre-commit(`.githooks/pre-commit`)이 막는다. stage 범위는 비교하지 않는다 → 일부만 골라 커밋하지 않는다.
   - pre-commit 은 git 이 실제로 커밋하는 작업 트리에서 돈다 → 워크트리·`git -C`·alias 와 무관하게 그 트리의 비밀 파일과 검증 기록을 본다. hook 경로(`core.hooksPath`)는 세션 시작 hook 과 `verify.sh` 가 `.githooks` 로 맞춘다. `.git/hooks` 에 기존 hook 이 있거나 다른 경로면 바꾸지 않고 실패한다 → 사람이 정리한다. 정리될 때까지는 커밋 명령 직전 hook 이 `git commit`·`git … commit` 을 막는다.
     - pre-commit 을 건너뛰는 명령은 `.claude/settings.json` deny 가 막는다: `--no-verify`(약어 포함), `git commit -n`·`git … commit … -n`, `hooksPath`(소문자·대문자 표기), `GIT_CONFIG*`, `commit-tree`, `hash-object`.

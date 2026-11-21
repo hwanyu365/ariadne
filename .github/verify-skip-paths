@@ -1,0 +1,7 @@
+# 검증 명령이 읽지 않는 경로. 한 줄에 git pathspec 하나, 매직 시그니처(`:(glob)` 등) 없이 쓴다 → verify.sh 가 `:(exclude)` 를 붙인다.
+# 마지막 전체 통과 뒤 이 범위 안 파일만 바뀌면 로컬 verify.sh 가 검증 명령을 건너뛴다. CI 는 항상 전체를 돌린다.
+# 막는 장치(.github/·.claude/hooks/·.githooks/)는 그 장치의 테스트가 검증 명령에 없을 때만 넣는다.
+docs/
+README.md
+.github/ISSUE_TEMPLATE/
+.github/pull_request_template.md
